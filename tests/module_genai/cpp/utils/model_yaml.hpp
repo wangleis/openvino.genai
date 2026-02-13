@@ -41,4 +41,7 @@ std::string Wan_2_1();
 
 // Return yaml content string for Qwen2.5-VL-3B-Instruct model pipeline configuration.
 std::string get_qwen2_5_vl_config_yaml(const std::string& model_path, const std::string& device = "CPU");
+
+// Return yaml content string for Qwen3.5-VL generated module pipeline configuration.
+std::string get_qwen3_5_vl_generated_config_yaml(const std::string& model_path, const std::string& device = "CPU");
 };  // namespace TEST_MODEL

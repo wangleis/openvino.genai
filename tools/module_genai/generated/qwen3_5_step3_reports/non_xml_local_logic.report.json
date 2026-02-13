@@ -1,0 +1,18 @@
+{
+  "prompt_encoder": {
+    "pass": true,
+    "exact_match": true,
+    "input_ids_len": 6
+  },
+  "embedding_merger": {
+    "pass": true,
+    "max_abs_diff": 0.0,
+    "shape": [
+      1,
+      6,
+      8
+    ]
+  },
+  "all_pass": true,
+  "note": "XML/IR 推理阶段已排除，仅比较 local-logic 阶段（prompt_encoder, embedding_merger）"
+}

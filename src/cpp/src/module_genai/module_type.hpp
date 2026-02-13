@@ -25,6 +25,12 @@ namespace module {
         X(TextEmbeddingModule, 21) \
         X(EmbeddingMergerModule, 22) \
         X(ClipTextEncoderModule, 23) \
+        X(GeneratedImagePreprocessorModule, 120) \
+        X(GeneratedPromptEncoderModule, 121) \
+        X(GeneratedTextEmbeddingModule, 122) \
+        X(GeneratedVisionEncoderModule, 123) \
+        X(GeneratedEmbeddingMergerModule, 124) \
+        X(GeneratedLlmInferenceModule, 125) \
         X(FeaturePrunerModule, 30) \
         X(FeatureFusionModule, 31) \
         X(VAEDecoderTilingModule, 32) \

@@ -1,0 +1,103 @@
+// Auto-generated parity template from existing module implementation
+// Copyright (C) 2023-2025 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
+
+#include "md_generated_image_preprocessor.hpp"
+
+#include "module_genai/module_factory.hpp"
+
+#include <chrono>
+#include <thread>
+
+namespace ov {
+namespace genai {
+namespace module {
+
+GENAI_REGISTER_MODULE_SAME(GeneratedImagePreprocessorModule);
+
+void GeneratedImagePreprocessorModule::print_static_config() {
+    std::cout << R"(
+  image_preprocessor:           # Module Name
+    type: "GeneratedImagePreprocessorModule"
+    device: "CPU"               # Optional, default to CPU
+    description: "Image or Video preprocessing."
+    inputs:
+      - name: "image"           # [optional]
+        type: "OVTensor"        # Support DataType: [OVTensor]
+        source: "ParentModuleName.OutputPortName"
+      - name: "images"          # [Optional] multiple images
+        type: "VecOVTensor"     # Support DataType: [VecOVTensor]
+        source: "ParentModuleName.OutputPortName"
+      - name: "video"           # [optional] video frames
+        type: "OVTensor"        # Support DataType: [OVTensor]
+        source: "ParentModuleName.OutputPortName"
+      - name: "videos"          # [Optional] multiple videos
+        type: "VecOVTensor"     # Support DataType: [VecOVTensor]
+        source: "ParentModuleName.OutputPortName"
+    outputs:
+      - name: "raw_data"        # Output port name
+        type: "OVTensor"        # Support DataType: [OVTensor]
+      - name: "source_size"     # Output port name
+        type: "VecInt"          # Support DataType: [VecInt]
+      - name: "raw_datas"       # batch processed vision output
+        type: "VecOVTensor"     # Support DataType: [VecOVTensor]
+      - name: "source_sizes"    # Output port name
+        type: "VecVecInt"       # Support DataType: [VecVecInt]
+    params:
+      target_resolution: [224, 224]   # optional
+      mean: [0.485, 0.456, 0.406]     # optional
+      std: [0.229, 0.224, 0.225]      # optional
+      model_path: "models/openvino_vision_embeddings_model.xml"
+    )" << std::endl;
+}
+
+GeneratedImagePreprocessorModule::GeneratedImagePreprocessorModule(const IBaseModuleDesc::PTR& desc, const PipelineDesc::PTR& pipeline_desc)
+    : IBaseModule(desc, pipeline_desc) {
+    std::string model_path = desc->get_full_path(desc->params["model_path"]);
+    std::string device = desc->device;
+    if (device.empty()) {
+        device = "CPU";
+    }
+
+    VLMModelType model_type = to_vlm_model_type(desc->model_type);
+
+    if (model_type == VLMModelType::QWEN2_VL || model_type == VLMModelType::QWEN2_5_VL) {
+        encoder_ptr = std::make_shared<VisionEncoderQwen2VL>(std::filesystem::path(model_path), device, ov::AnyMap{});
+    } else {
+        GENAI_ERR("GeneratedImagePreprocessorModule[" + desc->name + "]: Unsupported model type: " + desc->model_type);
+    }
+}
+
+GeneratedImagePreprocessorModule::~GeneratedImagePreprocessorModule() {}
+
+void GeneratedImagePreprocessorModule::run() {
+    GENAI_INFO("Running module: " + module_desc->name);
+    prepare_inputs();
+
+    if (exists_input("images")) {
+        auto images_data = get_input("images").as<std::vector<ov::Tensor>>();
+        std::vector<ov::Tensor> output_tensors;
+        std::vector<ImageSize> output_sizes;
+        for (size_t i = 0; i < images_data.size(); ++i) {
+            auto encoded_img = encoder_ptr->encode(images_data[i], ov::AnyMap{});
+            output_tensors.push_back(encoded_img.resized_source);
+            output_sizes.push_back(encoded_img.resized_source_size);
+        }
+        this->outputs["raw_datas"].data = output_tensors;
+        std::vector<std::vector<int>> sizes_vec;
+        for (const auto& sz : output_sizes) {
+            sizes_vec.push_back({static_cast<int>(sz.height), static_cast<int>(sz.width)});
+        }
+        this->outputs["source_sizes"].data = sizes_vec;
+    } else {
+        auto image1_data = get_input("image").as<ov::Tensor>();
+        auto encoded_img = encoder_ptr->encode(image1_data, ov::AnyMap{});
+        this->outputs["raw_data"].data = encoded_img.resized_source;
+        this->outputs["source_size"].data =
+            std::vector<int>{static_cast<int>(encoded_img.resized_source_size.height), static_cast<int>(encoded_img.resized_source_size.width)};
+    }
+}
+
+}  // namespace module
+}  // namespace genai
+}  // namespace ov

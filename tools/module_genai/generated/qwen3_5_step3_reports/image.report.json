@@ -1,0 +1,9 @@
+{
+  "ov_text": "a dog",
+  "py_text": "a dog",
+  "fallback_used": true,
+  "fallback_reason": "Check 'm_ireq_queue_tokenizer' failed at /home/wanglei/code/fork_genai/src/cpp/src/tokenizer/tokenizer_impl.cpp:578:\nEither openvino_tokenizer.xml was not provided or it was not loaded correctly. Tokenizer::encode is not available\n",
+  "exact_match": true,
+  "contains_match": true,
+  "pass": true
+}

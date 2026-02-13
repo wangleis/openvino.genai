@@ -20,13 +20,6 @@ if(NOT TARGET gtest)
   endforeach()
 endif()
 
-find_package(OpenCV REQUIRED)
-if(OpenCV_FOUND)
-    message(STATUS "OpenCV found. Version: ${OpenCV_VERSION}")
-else()
-    message(FATAL_ERROR "OpenCV not found! Check your installation and environment.")
-endif()
-
 # yaml-cpp dependency (use centralized cmake module)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/yaml-cpp.cmake)
 
@@ -38,11 +31,10 @@ set(TEST_TARGET_NAME "genai_modules_test")
 
 add_executable(${TEST_TARGET_NAME} ${src_modules} ${src_pipelines} ${src_utils} $<TARGET_OBJECTS:openvino_genai_obj>)
 
-target_link_libraries(${TEST_TARGET_NAME} PRIVATE $<TARGET_PROPERTY:openvino::genai,LINK_LIBRARIES> gtest_main gmock_main ${OpenCV_LIBS})
+target_link_libraries(${TEST_TARGET_NAME} PRIVATE $<TARGET_PROPERTY:openvino::genai,LINK_LIBRARIES> gtest_main gmock_main)
 target_include_directories(${TEST_TARGET_NAME} PRIVATE "${OpenVINOGenAI_SOURCE_DIR}/src/cpp/src"
                                                        "${CMAKE_CURRENT_SOURCE_DIR}"
-                                                       $<TARGET_PROPERTY:openvino::genai,INTERFACE_INCLUDE_DIRECTORIES>
-                                                       "${OpenCV_INCLUDE_DIRS}")
+                                                       $<TARGET_PROPERTY:openvino::genai,INTERFACE_INCLUDE_DIRECTORIES>)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   target_link_options(${TEST_TARGET_NAME} PRIVATE /IGNORE:4207,4286)

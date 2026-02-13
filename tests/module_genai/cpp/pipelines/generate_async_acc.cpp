@@ -24,6 +24,11 @@ TEST(PipelineTestAccuracy, GenerateVsGenerateAsync) {
     std::string qwen2_5_vl_model_path = TEST_MODEL::Qwen2_5_VL_3B_Instruct_INT4();
     std::string test_img_cat = TEST_DATA::img_cat_120_100();
 
+    if (!std::filesystem::exists(qwen2_5_vl_model_path) ||
+        !std::filesystem::exists(std::filesystem::path(qwen2_5_vl_model_path) / "openvino_model.xml")) {
+        GTEST_SKIP() << "Qwen2.5-VL model assets are not available at: " << qwen2_5_vl_model_path;
+    }
+
     std::string yaml_context = TEST_MODEL::get_qwen2_5_vl_config_yaml(qwen2_5_vl_model_path, device);
 
     ov::AnyMap inputs;

@@ -1,0 +1,19 @@
+module,definition_files,example_references
+Logger,src/cpp/src/logger.hpp;src/cpp/src/logger.cpp,src/cpp/src/whisper/models/with_past_decoder.cpp;src/cpp/src/rag/text_embedding_pipeline.cpp;src/cpp/src/sampling/structured_output/xgrammar_backend.cpp
+SynchronizedQueue,src/cpp/src/synchronized_queue.hpp,src/cpp/src/generation_stream.hpp;src/cpp/src/continuous_batching/threaded_streamer.hpp;src/cpp/src/image_generation/threaded_callback.hpp
+CircularBufferQueue,src/cpp/src/circular_buffer_queue.hpp,src/cpp/src/tokenizer/tokenizer_impl.hpp
+TokenizerCore,src/cpp/src/tokenizer/tokenizer_impl.hpp;src/cpp/src/tokenizer/tokenizer_impl.cpp,src/cpp/src/generation_config.cpp;src/cpp/src/sampling/sampler.cpp;src/cpp/src/sampling/structured_output/structured_output_controller.hpp
+TokenizersPath,src/cpp/src/tokenizer/tokenizers_path.hpp;src/cpp/src/tokenizer/tokenizers_path.cpp,src/cpp/src/tokenizer/tokenizer_impl.hpp
+MakeTokenizerStateful,src/cpp/src/tokenizer/make_tokenizer_stateful.hpp;src/cpp/src/tokenizer/make_tokenizer_stateful.cpp,src/cpp/src/tokenizer/tokenizer_impl.hpp
+GGUFUtils,src/cpp/src/gguf_utils/gguf.hpp;src/cpp/src/gguf_utils/gguf.cpp;src/cpp/src/gguf_utils/gguf_tokenizer.hpp;src/cpp/src/gguf_utils/gguf_tokenizer.cpp,src/cpp/src/tokenizer/add_second_input_pass.hpp;src/cpp/src/utils.cpp
+LoRAHelper,src/cpp/src/lora/helper.hpp;src/cpp/src/lora/helper.cpp;src/cpp/src/lora/common.hpp;src/cpp/src/lora/names_mapping.hpp;src/cpp/src/lora/names_mapping.cpp,src/cpp/src/continuous_batching/pipeline_impl.cpp;src/cpp/src/llm/pipeline_stateful.cpp;src/cpp/src/image_generation/models/autoencoder_kl.cpp
+LLMPipeline,src/cpp/src/llm/pipeline_base.hpp;src/cpp/src/llm/pipeline.cpp;src/cpp/src/llm/pipeline_stateful.hpp;src/cpp/src/llm/pipeline_static.hpp,src/cpp/src/speculative_decoding/speculative_decoding_stateful.hpp;src/cpp/src/continuous_batching/pipeline.cpp
+ContinuousBatching,src/cpp/src/continuous_batching/pipeline_impl.hpp;src/cpp/src/continuous_batching/pipeline_impl.cpp;src/cpp/src/continuous_batching/pipeline_base.hpp,src/cpp/src/speculative_decoding/continuous_batching_for_speculative_decoding_impl.hpp;src/cpp/src/prompt_lookup/continuous_batching_for_prompt_lookup.hpp
+CacheAndScheduler,src/cpp/src/continuous_batching/cache_manager.hpp;src/cpp/src/continuous_batching/cache_eviction.hpp;src/cpp/src/continuous_batching/scheduler.hpp;src/cpp/src/continuous_batching/kvcrush.hpp,src/cpp/src/continuous_batching/pipeline_impl.cpp;src/cpp/src/continuous_batching/cache_eviction.cpp
+Sampling,src/cpp/src/sampling/sampler.hpp;src/cpp/src/sampling/sampler.cpp;src/cpp/src/sampling/logit_processor.hpp;src/cpp/src/sampling/logit_transformers.hpp,src/cpp/src/llm/pipeline_stateful.cpp;src/cpp/src/llm/pipeline_static.cpp;src/cpp/src/whisper/whisper.cpp
+ImageGenHelpers,src/cpp/src/image_generation/image_processor.hpp;src/cpp/src/image_generation/image_processor.cpp;src/cpp/src/image_generation/numpy_utils.hpp;src/cpp/src/image_generation/numpy_utils.cpp,src/cpp/src/image_generation/*
+WhisperUtils,src/cpp/src/whisper/feature_extractor.hpp;src/cpp/src/whisper/whisper_utils.hpp;src/cpp/src/whisper/context_tokens.hpp,src/cpp/src/whisper/*
+GenerationControl,src/cpp/src/generation_handle.cpp;src/cpp/src/generation_stream.hpp;src/cpp/src/text_streamer.cpp,src/cpp/src/continuous_batching/pipeline_impl.cpp;src/cpp/src/generation_handle.cpp
+StructuredOutput,src/cpp/src/sampling/structured_output/structured_output_controller.hpp;src/cpp/src/sampling/structured_output/structured_output_controller.cpp;src/cpp/src/sampling/structured_output/xgrammar_backend.hpp;src/cpp/src/sampling/structured_output/xgrammar_backend.cpp,src/cpp/src/generation_config.cpp;src/cpp/src/sampling/logit_processor.hpp
+Utils,src/cpp/src/utils.hpp;src/cpp/src/utils.cpp;src/cpp/src/json_utils.hpp;src/cpp/src/json_container.cpp,many files across repo
+Others,see repo,see repo

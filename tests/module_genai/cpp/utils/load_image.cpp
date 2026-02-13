@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <sstream>
-#include <opencv2/opencv.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -56,49 +55,14 @@ ov::Tensor utils::create_countdown_frames()
     auto video = ov::Tensor(ov::element::u8,
                             ov::Shape{(size_t)frames_count, (size_t)height, (size_t)width, 3});
 
-    for (int i = frames_count; i > 0; i--)
-    {
-        cv::Mat frame = cv::Mat::zeros(height, width, CV_8UC3);
-        std::string text = std::to_string(i);
-
-        int baseline = 0;
-        int fontFace = cv::FONT_HERSHEY_SIMPLEX;
-        double fontScale = 3.0; // Python '3' is a double in C++ OpenCV
-        int thickness = 4;
-
-        // The C++ getTextSize returns the size as a cv::Size
-        cv::Size textSize = cv::getTextSize(
-            text,
-            fontFace,
-            fontScale,
-            thickness,
-            &baseline // baseline is passed by pointer
-        );
-
-        int text_width = textSize.width;
-        int text_height = textSize.height;
-        int text_x = (width - text_width) / 2;
-        int text_y = (height + text_height) / 2;
-
-        cv::Scalar color = cv::Scalar(255, 255, 255); // BGR: White
-        cv::Point org(text_x, text_y);                // Origin point for the text
-
-        cv::putText(
-            frame,
-            text,
-            org,
-            fontFace,
-            fontScale,
-            color,
-            thickness,
-            cv::LINE_AA // The line type constant
-        );
-
-        int idx = frames_count - i;
-        std::memcpy((char*)video.data() + idx * height * width * 3, frame.data, height * width * 3);
-
-        // cv::imshow("Centered Text Frame", frame);
-        // cv::waitKey(0);
+    // Fill each frame with a distinct grayscale intensity to preserve deterministic
+    // per-frame content without relying on external image processing libraries.
+    auto* dst = reinterpret_cast<uint8_t*>(video.data());
+    const size_t frame_size = static_cast<size_t>(height) * static_cast<size_t>(width) * 3;
+    for (int i = frames_count; i > 0; i--) {
+        const int idx = frames_count - i;
+        const uint8_t value = static_cast<uint8_t>(40 * i);
+        std::memset(dst + static_cast<size_t>(idx) * frame_size, value, frame_size);
     }
     return video;
 }

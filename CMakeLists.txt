@@ -70,6 +70,11 @@ include(cmake/features.cmake)
 include(cmake/version.cmake)
 include(cmake/vs_version.cmake)
 
+if(ENABLE_TESTS)
+    include(CTest)
+    enable_testing()
+endif()
+
 if(ENABLE_PYTHON)
     # the following two calls are required for cross-compilation
     if(OpenVINODeveloperPackage_FOUND)
@@ -106,7 +111,7 @@ if(EXISTS "${OpenVINOGenAI_SOURCE_DIR}/tests/cpp" AND ENABLE_TESTS)
     add_subdirectory(tests/cpp)
 endif()
 
-if(EXISTS "${OpenVINOGenAI_SOURCE_DIR}/tests/module_genai/cpp")
+if(EXISTS "${OpenVINOGenAI_SOURCE_DIR}/tests/module_genai/cpp" AND ENABLE_TESTS)
     add_subdirectory(tests/module_genai/cpp)
 endif()
 

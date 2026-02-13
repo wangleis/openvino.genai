@@ -1,0 +1,33 @@
+{
+  "python_model_file": "/home/wanglei/code/fork_genai/py_ref/modeling_qwen3_5.py",
+  "source_mode": "html_rawlines",
+  "recovered_source_file": "/home/wanglei/code/fork_genai/tools/module_genai/generated/qwen3_5_step2/modeling_qwen3_5.recovered.py",
+  "classes_count": 22,
+  "functions_count": 40,
+  "signals": {
+    "qwen3_5_conditional_generation": true,
+    "qwen3_5_model": true,
+    "vision_model": true,
+    "text_model": true,
+    "image_features": true,
+    "video_features": true,
+    "rope_index": true,
+    "rope_deltas": true,
+    "embed_merge": true,
+    "language_model": true,
+    "linear_attention": true
+  },
+  "notes": [
+    "检测到 Qwen3.5 条件生成主类，可映射主 pipeline。",
+    "检测到视觉主干，可映射 VisionEncoder。",
+    "检测到 RoPE index/delta 逻辑，可映射 VisionEncoder -> LLMInference。",
+    "检测到视频分支，YAML 保留 video_embedding 端口。",
+    "检测到线性注意力路径，CPU 对齐阶段注意 cache 行为。"
+  ],
+  "generated": {
+    "yaml_gpu": "/home/wanglei/code/fork_genai/tools/module_genai/generated/qwen3_5_step2/config.generated.gpu.yaml",
+    "yaml_cpu_compare": "/home/wanglei/code/fork_genai/tools/module_genai/generated/qwen3_5_step2/config.generated.cpu_compare.yaml",
+    "modules_dir": "/home/wanglei/code/fork_genai/tools/module_genai/generated/qwen3_5_step2/modules",
+    "python_ref_dir": "/home/wanglei/code/fork_genai/tools/module_genai/generated/qwen3_5_step2/python_ref"
+  }
+}

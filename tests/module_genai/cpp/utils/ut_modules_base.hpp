@@ -30,6 +30,24 @@ public:
     virtual ~ModuleTestBase() = default;
 
     void run() {
+        try {
+            const auto model_root = std::filesystem::path(get_model_path());
+            bool has_model_assets = false;
+            for (const auto& entry : std::filesystem::directory_iterator(model_root)) {
+                const auto name = entry.path().filename().string();
+                if (name == ".gitignore") {
+                    continue;
+                }
+                has_model_assets = true;
+                break;
+            }
+            if (!has_model_assets) {
+                GTEST_SKIP() << "MODEL_DIR has no model assets: " << model_root;
+            }
+        } catch (const std::exception& e) {
+            GTEST_SKIP() << "Model assets are unavailable: " << e.what();
+        }
+
         std::string yaml_content = generate_yaml_content();
         if (check_env_variable("DUMP_YAML")) {
             std::string filename = "dumped_" + m_test_name + ".yaml";

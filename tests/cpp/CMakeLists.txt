@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-find_package(yaml-cpp REQUIRED)
+# yaml-cpp dependency (use centralized cmake module)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/yaml-cpp.cmake)
 
 if(NOT TARGET gtest)
   set(INSTALL_GTEST OFF CACHE BOOL "")
@@ -28,13 +29,16 @@ set(TEST_TARGET_NAME "tests_continuous_batching")
 
 add_executable(${TEST_TARGET_NAME} ${tests_src} $<TARGET_OBJECTS:openvino_genai_obj>)
 
-target_link_libraries(${TEST_TARGET_NAME} PRIVATE $<TARGET_PROPERTY:openvino::genai,LINK_LIBRARIES> gtest_main gmock_main)
+target_link_libraries(${TEST_TARGET_NAME} PRIVATE $<TARGET_PROPERTY:openvino::genai,LINK_LIBRARIES> gtest_main gmock_main ${YAML_CPP_TARGET})
 target_include_directories(${TEST_TARGET_NAME} PRIVATE "${OpenVINOGenAI_SOURCE_DIR}/src/cpp/src"
                                                        $<TARGET_PROPERTY:openvino::genai,INTERFACE_INCLUDE_DIRECTORIES>)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   target_link_options(${TEST_TARGET_NAME} PRIVATE /IGNORE:4207,4286)
 endif()
+
+include(GoogleTest)
+gtest_discover_tests(${TEST_TARGET_NAME})
 
 install(TARGETS ${TEST_TARGET_NAME}
         RUNTIME DESTINATION tests/

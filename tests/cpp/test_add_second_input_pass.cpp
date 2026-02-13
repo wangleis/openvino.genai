@@ -153,6 +153,10 @@ TEST(AddSecondInputTest, add_second_input_test_1) {
 
 // Helper to run the pass and return result (false if pass failed)
 static bool run_add_second_input_pass(std::shared_ptr<ov::Model> model, std::ostringstream& pass_errors) {
+    if (shared_object_ov_tokenizers == nullptr) {
+        initlize_shared_ov_tokenziers();
+    }
+
     ov::pass::Manager manager;
     manager.register_pass<ov::genai::AddSecondInputPass>(shared_object_ov_tokenizers, pass_errors);
     manager.run_passes(model);

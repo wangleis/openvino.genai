@@ -124,6 +124,13 @@ public:
     void SetUp() override {
         REGISTER_TEST_NAME();
 
+        const auto model_root = std::filesystem::path(TEST_MODEL::Qwen2_5_VL_3B_Instruct_INT4());
+        const auto text_model = model_root / "openvino_text_embeddings_model.xml";
+        const auto vision_model = model_root / "openvino_vision_embeddings_model.xml";
+        if (!std::filesystem::exists(text_model) || !std::filesystem::exists(vision_model)) {
+            GTEST_SKIP() << "Required OV model assets are not available under: " << model_root;
+        }
+
         auto dmy_module_a_instance = std::make_shared<ov::genai::module::DummyModuleA>();
         auto dmy_module_b_instance = std::make_shared<ov::genai::module::DummyModuleB>();
         REGISTER_DUMMY_MODULE_IMPL(_dummy_module_a_name, dmy_module_a_instance);

@@ -5,7 +5,7 @@ from __future__ import annotations
 import collections.abc
 import openvino._pyopenvino
 import typing
-__all__: list[str] = ['Adapter', 'AdapterConfig', 'AggregationMode', 'AutoencoderKL', 'CLIPTextModel', 'CLIPTextModelWithProjection', 'CacheEvictionConfig', 'ChatHistory', 'ChunkStreamerBase', 'ContinuousBatchingPipeline', 'CppStdGenerator', 'DecodedResults', 'DeepSeekR1ReasoningIncrementalParser', 'DeepSeekR1ReasoningParser', 'EncodedGenerationResult', 'EncodedResults', 'ExtendedPerfMetrics', 'FluxTransformer2DModel', 'GenerationConfig', 'GenerationFinishReason', 'GenerationHandle', 'GenerationOutput', 'GenerationResult', 'GenerationStatus', 'Generator', 'Image2ImagePipeline', 'ImageGenerationConfig', 'ImageGenerationPerfMetrics', 'IncrementalParser', 'InpaintingPipeline', 'KVCrushAnchorPointMode', 'KVCrushConfig', 'LLMPipeline', 'Llama3JsonToolParser', 'Llama3PythonicToolParser', 'MeanStdPair', 'Parser', 'PerfMetrics', 'Phi4ReasoningIncrementalParser', 'Phi4ReasoningParser', 'PipelineMetrics', 'RawImageGenerationPerfMetrics', 'RawPerfMetrics', 'ReasoningIncrementalParser', 'ReasoningParser', 'SD3Transformer2DModel', 'SDPerModelsPerfMetrics', 'SDPerfMetrics', 'Scheduler', 'SchedulerConfig', 'SparseAttentionConfig', 'SparseAttentionMode', 'SpeechGenerationConfig', 'SpeechGenerationPerfMetrics', 'StopCriteria', 'StreamerBase', 'StreamingStatus', 'StructuralTagItem', 'StructuralTagsConfig', 'StructuredOutputConfig', 'SummaryStats', 'T5EncoderModel', 'Text2ImagePipeline', 'Text2SpeechDecodedResults', 'Text2SpeechPipeline', 'TextEmbeddingPipeline', 'TextParserStreamer', 'TextRerankPipeline', 'TextStreamer', 'TokenizedInputs', 'Tokenizer', 'TorchGenerator', 'UNet2DConditionModel', 'VLMDecodedResults', 'VLMPerfMetrics', 'VLMPipeline', 'ModulePipeline', 'VLMRawPerfMetrics', 'WhisperDecodedResultChunk', 'WhisperDecodedResults', 'WhisperGenerationConfig', 'WhisperPerfMetrics', 'WhisperPipeline', 'WhisperRawPerfMetrics', 'draft_model', 'get_version']
+__all__: list[str] = ['Adapter', 'AdapterConfig', 'AggregationMode', 'AutoencoderKL', 'CLIPTextModel', 'CLIPTextModelWithProjection', 'CacheEvictionConfig', 'ChatHistory', 'ChunkStreamerBase', 'ContinuousBatchingPipeline', 'CppStdGenerator', 'DecodedResults', 'DeepSeekR1ReasoningIncrementalParser', 'DeepSeekR1ReasoningParser', 'EncodedGenerationResult', 'EncodedResults', 'ExtendedPerfMetrics', 'FluxTransformer2DModel', 'GenerationConfig', 'GenerationFinishReason', 'GenerationHandle', 'GenerationOutput', 'GenerationResult', 'GenerationStatus', 'Generator', 'Image2ImagePipeline', 'ImageGenerationConfig', 'ImageGenerationPerfMetrics', 'IncrementalParser', 'InpaintingPipeline', 'KVCrushAnchorPointMode', 'KVCrushConfig', 'LLMPipeline', 'Llama3JsonToolParser', 'Llama3PythonicToolParser', 'MeanStdPair', 'ModulePipeline', 'Parser', 'PerfMetrics', 'Phi4ReasoningIncrementalParser', 'Phi4ReasoningParser', 'PipelineMetrics', 'RawImageGenerationPerfMetrics', 'RawPerfMetrics', 'ReasoningIncrementalParser', 'ReasoningParser', 'SD3Transformer2DModel', 'SDPerModelsPerfMetrics', 'SDPerfMetrics', 'Scheduler', 'SchedulerConfig', 'SparseAttentionConfig', 'SparseAttentionMode', 'SpeechGenerationConfig', 'SpeechGenerationPerfMetrics', 'StopCriteria', 'StreamerBase', 'StreamingStatus', 'StructuralTagItem', 'StructuralTagsConfig', 'StructuredOutputConfig', 'SummaryStats', 'T5EncoderModel', 'Text2ImagePipeline', 'Text2SpeechDecodedResults', 'Text2SpeechPipeline', 'TextEmbeddingPipeline', 'TextParserStreamer', 'TextRerankPipeline', 'TextStreamer', 'TokenizedInputs', 'Tokenizer', 'TorchGenerator', 'UNet2DConditionModel', 'VLMDecodedResults', 'VLMPerfMetrics', 'VLMPipeline', 'VLMRawPerfMetrics', 'ValidationResult', 'WhisperDecodedResultChunk', 'WhisperDecodedResults', 'WhisperGenerationConfig', 'WhisperPerfMetrics', 'WhisperPipeline', 'WhisperRawPerfMetrics', 'draft_model', 'get_version']
 class Adapter:
     """
     Immutable LoRA Adapter that carries the adaptation matrices and serves as unique adapter identifier.
@@ -1855,6 +1855,131 @@ class MeanStdPair:
         ...
     @property
     def std(self) -> float:
+        ...
+class ModulePipeline:
+    """
+    This class is used for generation with ModulePipeline
+    """
+    @staticmethod
+    def comfyui_json_string_to_yaml(comfyui_json_content: str, **kwargs) -> tuple:
+        """
+                    Convert ComfyUI JSON string to YAML configuration string.
+        
+                    :param comfyui_json_content: ComfyUI JSON content string (workflow or API format).
+                    :type comfyui_json_content: str
+                    :param kwargs: Optional pipeline parameters like model_path_base, default_device.
+                    :return: Tuple of (yaml_config_string, extracted_parameters_dict).
+                    :rtype: tuple[str, dict]
+        """
+    @staticmethod
+    def comfyui_json_to_yaml(comfyui_json_path: os.PathLike | str | bytes, **kwargs) -> tuple:
+        """
+                    Convert ComfyUI JSON file to YAML configuration string.
+        
+                    :param comfyui_json_path: Path to ComfyUI JSON file (workflow or API format).
+                    :type comfyui_json_path: os.PathLike
+                    :param kwargs: Optional pipeline parameters like model_path_base, default_device.
+                    :return: Tuple of (yaml_config_string, extracted_parameters_dict).
+                    :rtype: tuple[str, dict]
+        """
+    @staticmethod
+    def validate_config(config_yaml_path: os.PathLike | str | bytes) -> ValidationResult:
+        """
+                    Validate YAML configuration file.
+        
+                    :param config_yaml_path: Path to the YAML configuration file.
+                    :type config_yaml_path: os.PathLike
+                    :return: ValidationResult containing valid flag, errors and warnings.
+                    :rtype: ValidationResult
+        """
+    @staticmethod
+    def validate_config_string(config_yaml_content: str) -> ValidationResult:
+        """
+                    Validate YAML configuration content string.
+        
+                    :param config_yaml_content: YAML configuration content as string.
+                    :type config_yaml_content: str
+                    :return: ValidationResult containing valid flag, errors and warnings.
+                    :rtype: ValidationResult
+        """
+    @typing.overload
+    def __init__(self, config_yaml_path: os.PathLike | str | bytes, models_map: typing.Any = None, **kwargs) -> None:
+        """
+                    Module Pipeline class constructor.
+        
+                    :param config_yaml_path: Path to the configuration YAML file.
+                    :type config_yaml_path: os.PathLike
+                    :param models_map: Optional pre-loaded models map. Format: {"module_name": {"model_name": ov.Model, ...}, ...}
+                    :type models_map: dict[str, dict[str, openvino.Model]], optional
+        """
+    @typing.overload
+    def __init__(self, config_yaml_content: str, models_map: typing.Any = None, **kwargs) -> None:
+        """
+                    Module Pipeline class constructor.
+        
+                    :param config_yaml_content: YAML content as a string.
+                    :type config_yaml_content: str
+                    :param models_map: Optional pre-loaded models map. Format: {"module_name": {"model_name": ov.Model, ...}, ...}
+                    :type models_map: dict[str, dict[str, openvino.Model]], optional
+        """
+    def finish_chat(self) -> None:
+        ...
+    def generate(self, **kwargs) -> None:
+        """
+        generate(**kwargs) -> None
+        
+        Accepts arbitrary keyword arguments as AnyMap.
+        
+        
+            Generates sequences or image, video for Modular LLM.
+        
+            :param prompt: input prompt
+            :type prompt: str
+            The prompt can contain <ov_genai_image_i> with i replaced with
+            
+        
+            :param inputs: Any inputs.
+            :type inputs: dict
+        
+            :return: return results
+            :rtype: dict
+        """
+    def generate_async(self, **kwargs) -> None:
+        """
+        generate_async(**kwargs) -> None
+        
+        Accepts arbitrary keyword arguments as AnyMap.
+        
+        
+            Generates sequences or image, video for Modular LLM.
+        
+            :param prompt: input prompt
+            :type prompt: str
+            The prompt can contain <ov_genai_image_i> with i replaced with
+            
+        
+            :param inputs: Any inputs.
+            :type inputs: dict
+        
+            :return: return results
+            :rtype: dict
+        """
+    @typing.overload
+    def get_output(self, output_name: str) -> typing.Any:
+        """
+        Get output by name.
+        
+        :param output_name: Name of the output.
+        :return: Output value.
+        """
+    @typing.overload
+    def get_output(self) -> typing.Any:
+        """
+        Get the only output when there is a single output.
+        
+        :return: Output value.
+        """
+    def start_chat(self, system_message: str = '') -> None:
         ...
 class Parser:
     def __init__(self) -> None:
@@ -3760,31 +3885,6 @@ class VLMPerfMetrics(PerfMetrics):
     @property
     def vlm_raw_metrics(self) -> VLMRawPerfMetrics:
         ...
-
-class ModulePipeline:
-    """
-    This class is used for generation with Modules
-    """
-    @typing.overload
-    def __init__(self, yaml_path: os.PathLike | str | bytes) -> None:
-        """
-                    ModulePipeline class constructor.
-                    models_path (os.PathLike): Path to the folder with exported model files.
-                    device (str): Device to run the model on (e.g., CPU, GPU). Default is 'CPU'.
-                    kwargs: Device properties
-        """
-    @typing.overload
-    def generate(self, **kwargs) -> None:
-        """
-            Generates sequences or image, video for Modules.
-        
-            :param kwargs: arbitrary keyword arguments with keys corresponding to Yaml Config's inputs.
-            :type : dict
-        
-            :return: return results
-            :rtype: None
-        """
- 
 class VLMPipeline:
     """
     This class is used for generation with VLMs
@@ -4066,6 +4166,38 @@ class VLMRawPerfMetrics:
         ...
     @property
     def prepare_embeddings_durations(self) -> list[float]:
+        ...
+class ValidationResult:
+    """
+    Result of YAML configuration validation
+    """
+    def __init__(self) -> None:
+        ...
+    def __repr__(self) -> str:
+        ...
+    @property
+    def errors(self) -> list[str]:
+        """
+        List of error messages
+        """
+    @errors.setter
+    def errors(self, arg0: collections.abc.Sequence[str]) -> None:
+        ...
+    @property
+    def valid(self) -> bool:
+        """
+        Whether the configuration is valid
+        """
+    @valid.setter
+    def valid(self, arg0: bool) -> None:
+        ...
+    @property
+    def warnings(self) -> list[str]:
+        """
+        List of warning messages
+        """
+    @warnings.setter
+    def warnings(self, arg0: collections.abc.Sequence[str]) -> None:
         ...
 class WhisperDecodedResultChunk:
     """
