@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <optional>
+#include <unordered_map>
 
 #include <openvino/runtime/tensor.hpp>
 
@@ -196,6 +197,15 @@ public:
         const ov::genai::StreamerVariant& streamer,
         const std::optional<std::vector<ov::Tensor>>& token_type_ids,
         const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids);
+
+    /// Overload that accepts optional extra inputs (e.g. deepstack_visual_embeds, visual_pos_masks, attention_mask).
+    std::vector<EncodedGenerationResult> generate(
+        const std::vector<ov::Tensor>& input_ids,
+        const std::vector<ov::genai::GenerationConfig>& sampling_params,
+        const ov::genai::StreamerVariant& streamer,
+        const std::optional<std::vector<ov::Tensor>>& token_type_ids,
+        const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids,
+        const std::optional<std::vector<std::unordered_map<std::string, ov::Tensor>>>& lm_extra_inputs_list);
 
     std::vector<GenerationResult> generate(const std::vector<std::string>& prompts, const std::vector<ov::genai::GenerationConfig>& sampling_params, const ov::genai::StreamerVariant& streamer=std::monostate{});
     

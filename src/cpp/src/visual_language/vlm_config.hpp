@@ -21,6 +21,7 @@ enum class VLMModelType {
     QWEN2_VL,
     QWEN2_5_VL,
     QWEN3_VL,
+    MODELING_VL,  // Added for modeling_vl model type support
     GEMMA3,
 };
 
