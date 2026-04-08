@@ -361,7 +361,18 @@ void apply_gather_before_matmul_transformation(std::shared_ptr<ov::Model> model)
 }
 
 ov::Core& singleton_core() {
-    static ov::Core core;
+    static ov::Core core = []() {
+        ov::Core c;
+        // Trigger CPU plugin loading so that internal opsets (e.g.
+        // ie_internal_opset with RoPE) are registered before any
+        // read_model() call that may reference them.
+        try {
+            c.get_versions("CPU");
+        } catch (...) {
+            // Best-effort: ignore if CPU plugin is unavailable.
+        }
+        return c;
+    }();
     return core;
 }
 

@@ -96,9 +96,9 @@ struct HiddenStateRange {
 };
 
 
-/**
- * @brief Per-forward-call context for aggregating and filling deepstack visual embedding inputs.
- */
+// Dense-layout deepstack context: creates deepstack_visual_embeds as [L, S, H]
+// (S = total_num_tokens) instead of compact [L, V, H], so that Select-node
+// broadcasting works after SDPAToPagedAttention flattens the batch dimension.
 struct DeepstackContext {
     struct DeepstackGroupData {
         size_t scheduled_vision_tokens_num = 0;
@@ -108,7 +108,6 @@ struct DeepstackContext {
     std::vector<DeepstackGroupData> deepstack_group_data_list;
     size_t deepstack_layers_num = 0;
     size_t total_scheduled_vision_tokens = 0;
-    size_t deepstack_embeds_write_offset = 0;
     bool have_deepstack_visual_inputs = false;
 
     void aggregate_deepstack_data(const SequenceGroup::CPtr& sequence_group, size_t num_sequence_groups) {
@@ -157,12 +156,13 @@ struct DeepstackContext {
         deepstack_group_data_list.push_back(deepstack_group_data);
     }
 
-    void fill_deepstack_visual_embeds(
+    void fill_deepstack_visual_embeds_dense(
         ov::Tensor& deepstack_visual_embeds,
         const SequenceGroup::CPtr& sequence_group,
         size_t group_index,
         size_t hidden_size,
-        size_t num_running_sequences
+        size_t num_running_sequences,
+        size_t total_num_tokens
     ) {
         OPENVINO_ASSERT(have_deepstack_visual_inputs, "No deepstack visual inputs to fill");
         OPENVINO_ASSERT(group_index < deepstack_group_data_list.size(),
@@ -170,30 +170,41 @@ struct DeepstackContext {
 
         const auto& deepstack_group_data = deepstack_group_data_list[group_index];
 
-        if (total_scheduled_vision_tokens == 0) {
-            OPENVINO_ASSERT(deepstack_visual_embeds.get_shape()[1] == 1,
-                "Unexpected deepstack_visual_embeds shape when no vision tokens are scheduled");
-        } else if (deepstack_group_data.scheduled_vision_tokens_num > 0) {
-            const auto& deepstack = sequence_group->get_deepstack_visual_embeds();
-            
-            const float* src = deepstack.data<const float>();
-            const size_t src_vision_tokens_num = deepstack.get_shape()[1];
-            float* dst = deepstack_visual_embeds.data<float>();
-
-            // Copy block of vision tokens within scheduled window per each deepstack layer
-            const size_t vision_tokens_copy_num = deepstack_group_data.scheduled_vision_tokens_num;
-            for (size_t seq_idx = 0; seq_idx < num_running_sequences; ++seq_idx) {
-                for (size_t layer = 0; layer < deepstack_layers_num; ++layer) {
-                    const size_t src_offset = layer * src_vision_tokens_num * hidden_size
-                                            + deepstack_group_data.vision_tokens_offset * hidden_size;
-                    const size_t dst_offset = layer * total_scheduled_vision_tokens * hidden_size
-                                            + (deepstack_embeds_write_offset + seq_idx * vision_tokens_copy_num) * hidden_size;
-                    std::copy_n(src + src_offset, vision_tokens_copy_num * hidden_size, dst + dst_offset);
-                }
-            }
-            deepstack_embeds_write_offset += vision_tokens_copy_num * num_running_sequences;
+        if (deepstack_group_data.scheduled_vision_tokens_num == 0) {
+            return;
         }
+
+        const auto& deepstack = sequence_group->get_deepstack_visual_embeds();
+        const float* src = deepstack.data<const float>();
+        const size_t src_vision_tokens_num = deepstack.get_shape()[1];
+        float* dst = deepstack_visual_embeds.data<float>();
+
+        const auto& mask = sequence_group->get_visual_pos_masks();
+        const size_t num_scheduled_tokens = sequence_group->get_num_scheduled_tokens();
+        const size_t group_position_id = sequence_group->get_num_processed_tokens();
+
+        for (size_t seq_idx = 0; seq_idx < num_running_sequences; ++seq_idx) {
+            size_t src_vision_idx = deepstack_group_data.vision_tokens_offset;
+            for (size_t j = 0; j < num_scheduled_tokens; ++j) {
+                const size_t pos = group_position_id + j;
+                const bool is_vision = (mask && pos < mask->size()) ? (*mask)[pos] : false;
+                if (!is_vision) {
+                    continue;
+                }
+                for (size_t layer = 0; layer < deepstack_layers_num; ++layer) {
+                    const size_t src_off = layer * src_vision_tokens_num * hidden_size
+                                         + src_vision_idx * hidden_size;
+                    const size_t dst_off = layer * total_num_tokens * hidden_size
+                                         + (dense_token_write_offset + seq_idx * num_scheduled_tokens + j) * hidden_size;
+                    std::copy_n(src + src_off, hidden_size, dst + dst_off);
+                }
+                src_vision_idx++;
+            }
+        }
+        dense_token_write_offset += num_scheduled_tokens * num_running_sequences;
     }
+
+    size_t dense_token_write_offset = 0;
 };
 
 /**
@@ -297,6 +308,14 @@ public:
     void set_inputs_embedder(const std::shared_ptr<InputsEmbedder>& inputs_embedder) {
         m_inputs_embedder = inputs_embedder;
         m_embedding = inputs_embedder->get_embedding_model();
+    }
+
+    /// Set the embedding model directly, without requiring an InputsEmbedder.
+    /// Used when the caller provides its own visual/multimodal embeddings
+    /// (e.g. composable pipeline with Qwen3-Omni) and only needs the
+    /// token-to-embedding conversion during the generation phase.
+    void set_embedding_model(const EmbeddingsModel::Ptr& embedding) {
+        m_embedding = embedding;
     }
 
     /**
@@ -425,7 +444,7 @@ public:
             if (deepstack_context.have_deepstack_visual_inputs) {
                 const ov::Shape deepstack_embeds_shape{
                     deepstack_context.deepstack_layers_num,
-                    std::max(deepstack_context.total_scheduled_vision_tokens, size_t(1)),
+                    total_num_tokens,
                     hidden_size
                 };
                 deepstack_visual_embeds = _get_or_resize_tensor(m_cached_deepstack_visual_embeds, "deepstack_visual_embeds",
@@ -487,12 +506,13 @@ public:
             if (sequence_group_type == SequenceGroupType::EMBEDDINGS 
                 && deepstack_context.have_deepstack_visual_inputs
             ) {
-                deepstack_context.fill_deepstack_visual_embeds(
+                deepstack_context.fill_deepstack_visual_embeds_dense(
                     deepstack_visual_embeds,
                     sequence_group,
                     i,
                     hidden_size,
-                    num_running_sequences
+                    num_running_sequences,
+                    total_num_tokens
                 );
             }
 
@@ -734,6 +754,7 @@ public:
             m_request.set_tensor("score_aggregation_window", score_aggregation_window);
         }
 
+
         {
             static ManualTimer timer("pure generate inference");
             timer.start();
@@ -802,8 +823,29 @@ public:
                     pos++;
 
                     size_t position_id = token_idx + sequence_group->get_prompt_len();
-                    auto new_position_ids = m_inputs_embedder->get_generation_phase_position_ids(1, position_id, seq->get_rope_delta()).first;
-                    seq->append_position_ids(new_position_ids);
+                    if (m_inputs_embedder) {
+                        auto new_position_ids = m_inputs_embedder->get_generation_phase_position_ids(1, position_id, seq->get_rope_delta()).first;
+                        seq->append_position_ids(new_position_ids);
+                    } else {
+                        // Compute generation-phase position_ids inline.
+                        // Detect M-RoPE (rank 3) vs standard (rank 2) from existing position_ids on the sequence.
+                        const auto& pos_list = seq->get_position_ids_list();
+                        bool is_mrope = !pos_list.empty() && pos_list.front().get_shape().size() == 3;
+                        if (is_mrope) {
+                            // M-RoPE: [3, 1, 1] tensor where all 3 dims = position_id + rope_delta
+                            ov::Tensor new_position_ids{ov::element::i64, {3, 1, 1}};
+                            int64_t pos_val = static_cast<int64_t>(position_id) + seq->get_rope_delta();
+                            for (size_t dim = 0; dim < 3; ++dim) {
+                                new_position_ids.data<int64_t>()[dim] = pos_val;
+                            }
+                            seq->append_position_ids(new_position_ids);
+                        } else {
+                            // Standard: [1, 1] tensor with position_id
+                            ov::Tensor new_position_ids{ov::element::i64, {1, 1}};
+                            new_position_ids.data<int64_t>()[0] = static_cast<int64_t>(position_id);
+                            seq->append_position_ids(new_position_ids);
+                        }
+                    }
                 }
             }
         }

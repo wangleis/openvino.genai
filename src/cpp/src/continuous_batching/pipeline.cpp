@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <cstdint>
+#include <fstream>
 #include <mutex>
 #include <memory>
 #include <openvino/runtime/properties.hpp>
@@ -85,6 +86,72 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline( const std::filesystem::p
     else {
         m_impl = std::make_shared<ContinuousBatchingImpl>(model, tokenizer, scheduler_config, device, properties_without_draft_model_without_gguf, generation_config);
     }
+
+    m_impl->m_load_time_ms = get_load_time(start_time);
+}
+
+ContinuousBatchingPipeline::ContinuousBatchingPipeline(
+    const std::filesystem::path& models_path,
+    const std::filesystem::path& embeddings_model_path,
+    const SchedulerConfig& scheduler_config,
+    const std::string& device,
+    const ov::AnyMap& properties,
+    const ov::genai::GenerationConfig& generation_config) {
+    auto start_time = std::chrono::steady_clock::now();
+
+    auto model = utils::read_model(models_path, properties);
+    auto tokenizer = ov::genai::Tokenizer(models_path);
+    auto gen_config = utils::from_config_json_if_exists(models_path);
+    if (generation_config.max_new_tokens > 0) {
+        gen_config = generation_config;
+    }
+
+    std::ifstream xml_stream(embeddings_model_path, std::ios::in);
+    OPENVINO_ASSERT(xml_stream.is_open(), "Failed to open embeddings model: ", embeddings_model_path.string());
+    std::string xml_str((std::istreambuf_iterator<char>(xml_stream)), std::istreambuf_iterator<char>());
+
+    auto bin_path = std::filesystem::path(embeddings_model_path).replace_extension(".bin");
+    ov::Tensor weights_tensor;
+    if (std::filesystem::exists(bin_path)) {
+        std::ifstream bin_stream(bin_path, std::ios::binary | std::ios::ate);
+        OPENVINO_ASSERT(bin_stream.is_open(), "Failed to open embeddings weights: ", bin_path.string());
+        size_t file_size = static_cast<size_t>(bin_stream.tellg());
+        bin_stream.seekg(0, std::ios::beg);
+        weights_tensor = ov::Tensor(ov::element::u8, {file_size});
+        bin_stream.read(reinterpret_cast<char*>(weights_tensor.data<uint8_t>()), file_size);
+    }
+
+    auto embeddings = std::make_shared<EmbeddingsModel>(xml_str, weights_tensor, 1.0f, device, properties);
+
+    ov::AnyMap props = properties;
+    props[ov::cache_model_path.name()] = models_path;
+
+    utils::print_scheduler_config_info(scheduler_config);
+
+    m_impl = std::make_shared<ContinuousBatchingImpl>(
+        model, embeddings, tokenizer, scheduler_config, device, props, gen_config);
+
+    m_impl->m_load_time_ms = get_load_time(start_time);
+}
+
+ContinuousBatchingPipeline::ContinuousBatchingPipeline(
+    const std::shared_ptr<ov::Model>& model,
+    const std::string& embeddings_model_xml,
+    const ov::Tensor& embeddings_weights,
+    const ov::genai::Tokenizer& tokenizer,
+    const SchedulerConfig& scheduler_config,
+    const std::string& device,
+    const ov::AnyMap& properties,
+    const ov::genai::GenerationConfig& generation_config) {
+    auto start_time = std::chrono::steady_clock::now();
+
+    auto embeddings_model = EmbeddingsModel::create(
+        embeddings_model_xml, embeddings_weights, 1.0f, device, properties);
+
+    utils::print_scheduler_config_info(scheduler_config);
+
+    m_impl = std::make_shared<ContinuousBatchingImpl>(
+        model, embeddings_model, tokenizer, scheduler_config, device, properties, generation_config);
 
     m_impl->m_load_time_ms = get_load_time(start_time);
 }
@@ -293,6 +360,23 @@ std::vector<EncodedGenerationResult> ContinuousBatchingPipeline::generate(
     const std::optional<std::vector<ov::Tensor>>& token_type_ids,
     const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids) {
     auto encoded_results = m_impl->generate(input_ids, sampling_params, streamer, token_type_ids, position_ids);
+
+    for (auto& encoded_result : encoded_results) {
+        encoded_result.perf_metrics.load_time = m_impl->m_load_time_ms;
+    }
+
+    return encoded_results;
+}
+
+std::vector<EncodedGenerationResult> ContinuousBatchingPipeline::generate(
+    const std::vector<ov::Tensor>& input_ids,
+    const std::vector<ov::genai::GenerationConfig>& sampling_params,
+    const StreamerVariant& streamer,
+    const std::optional<std::vector<ov::Tensor>>& token_type_ids,
+    const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids,
+    const std::optional<std::vector<std::unordered_map<std::string, ov::Tensor>>>& lm_extra_inputs) {
+    auto encoded_results = m_impl->generate(input_ids, sampling_params, streamer, token_type_ids, position_ids,
+                                             std::nullopt, lm_extra_inputs);
 
     for (auto& encoded_result : encoded_results) {
         encoded_result.perf_metrics.load_time = m_impl->m_load_time_ms;

@@ -51,6 +51,11 @@ protected:
 
     std::shared_ptr<ov::genai::CacheRotationCalculator> m_cache_rotation_calculator;
 
+    // Externally-provided position_ids and rope_delta for the current generate() call.
+    // Used when m_inputs_embedder is null (e.g. composable pipeline provides its own embeddings).
+    std::optional<ov::Tensor> m_pending_position_ids;
+    std::optional<int64_t> m_pending_rope_delta;
+
 
 #ifdef DEBUG_CACHE_STATE_DUMP
     size_t step_count = 0;
@@ -111,6 +116,15 @@ public:
 
     ContinuousBatchingImpl(const std::shared_ptr<ov::Model>& model,
                            std::shared_ptr<InputsEmbedder> inputs_embedder,
+                           const Tokenizer& tokenizer,
+                           const SchedulerConfig& scheduler_config,
+                           const std::string& device,
+                           const ov::AnyMap& properties,
+                           const ov::genai::GenerationConfig& generation_config,
+                           bool is_validation_mode_enabled = false);
+
+    ContinuousBatchingImpl(const std::shared_ptr<ov::Model>& model,
+                           EmbeddingsModel::Ptr embeddings_model,
                            const Tokenizer& tokenizer,
                            const SchedulerConfig& scheduler_config,
                            const std::string& device,

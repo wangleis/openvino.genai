@@ -116,21 +116,72 @@ public:
     );
 
     /**
-     * @brief Constructs a ContinuousBatchingPipeline from already existing model and tokenizer.
-     * 
-     * This constructor allows for the creation of a ContinuousBatchingPipeline using an existing model
-     * represented as a string and a weights tensor, along with a manually initialized tokenizer.
-     * This is useful when the model and tokenizer are already loaded or created in memory and do not
-     * need to be loaded from files.
+     * @brief Constructs a ContinuousBatchingPipeline in EMBEDDINGS mode using an explicit
+     * text-embeddings model path.  Bypasses InputsEmbedder / VLM-type validation so that
+     * unsupported VLM architectures (e.g. Qwen3-Omni) can still use continuous batching
+     * with externally-provided visual/multimodal embeddings.
      *
-     * @param model_str A string representation of the model.
-     * @param weights_tensor A tensor containing the weights of the model.
-     * @param tokenizer A manually initialized ov::genai::Tokenizer.
-     * @param scheduler_config Configuration for the scheduler.
-     * @param device The device to run the pipeline on (e.g., CPU, GPU).
-     * @param properties Optional properties for the pipeline.
-     * @param generation_config Optional generation configuration for the pipeline.
+     * @param models_path       Directory containing the language model and tokenizer.
+     * @param embeddings_model_path  Full path to the text-embeddings .xml file
+     *                               (e.g. cp_text_embeddings_model.xml).
+     * @param scheduler_config  Scheduler configuration.
+     * @param device            Target device (e.g. "CPU").
+     * @param properties        Optional compilation properties.
+     * @param generation_config Optional generation configuration.
      */
+    ContinuousBatchingPipeline(
+        const std::filesystem::path& models_path,
+        const std::filesystem::path& embeddings_model_path,
+        const SchedulerConfig& scheduler_config,
+        const std::string& device,
+        const ov::AnyMap& properties = {},
+        const ov::genai::GenerationConfig& generation_config = {}
+    );
+
+    /**
+     * @brief Constructs a ContinuousBatchingPipeline from a pre-loaded and potentially
+     * pre-transformed ov::Model, together with a text-embeddings model for EMBEDDINGS mode.
+     *
+     * Use this constructor when the language model has been modified in-memory (e.g. by a
+     * graph transformation pass) and should not be re-read from disk.  The language model
+     * is compiled as-is after SDPAToPagedAttention is applied internally.
+     *
+     * @param model                   Pre-loaded (and optionally pre-transformed) ov::Model.
+     * @param embeddings_model_xml    XML string of the text-embeddings model.
+     * @param embeddings_weights      Weights tensor of the text-embeddings model.
+     * @param tokenizer               Manually initialised ov::genai::Tokenizer.
+     * @param scheduler_config        Scheduler configuration.
+     * @param device                  Target device (e.g. "CPU").
+     * @param properties              Optional compilation properties.
+     * @param generation_config       Optional generation configuration.
+     */
+    ContinuousBatchingPipeline(
+        const std::shared_ptr<ov::Model>& model,
+        const std::string& embeddings_model_xml,
+        const ov::Tensor& embeddings_weights,
+        const ov::genai::Tokenizer& tokenizer,
+        const SchedulerConfig& scheduler_config,
+        const std::string& device,
+        const ov::AnyMap& properties = {},
+        const ov::genai::GenerationConfig& generation_config = {}
+    );
+
+    /**
+      * @brief Constructs a ContinuousBatchingPipeline from already existing model and tokenizer.
+      * 
+      * This constructor allows for the creation of a ContinuousBatchingPipeline using an existing model
+      * represented as a string and a weights tensor, along with a manually initialized tokenizer.
+      * This is useful when the model and tokenizer are already loaded or created in memory and do not
+      * need to be loaded from files.
+      *
+      * @param model_str A string representation of the model.
+      * @param weights_tensor A tensor containing the weights of the model.
+      * @param tokenizer A manually initialized ov::genai::Tokenizer.
+      * @param scheduler_config Configuration for the scheduler.
+      * @param device The device to run the pipeline on (e.g., CPU, GPU).
+      * @param properties Optional properties for the pipeline.
+      * @param generation_config Optional generation configuration for the pipeline.
+      */
     ContinuousBatchingPipeline(
         const std::string& model_str,
         const ov::Tensor& weights_tensor,
@@ -196,6 +247,18 @@ public:
         const ov::genai::StreamerVariant& streamer,
         const std::optional<std::vector<ov::Tensor>>& token_type_ids,
         const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids);
+
+    /// Overload that additionally accepts per-request lm_extra_inputs (e.g. deepstack
+    /// visual embeddings for Qwen3-Omni).  Each map entry is forwarded to the
+    /// corresponding SequenceGroup, which parses known keys such as
+    /// "deepstack_visual_embeds" and "visual_pos_masks".
+    std::vector<EncodedGenerationResult> generate(
+        const std::vector<ov::Tensor>& input_ids,
+        const std::vector<ov::genai::GenerationConfig>& sampling_params,
+        const ov::genai::StreamerVariant& streamer,
+        const std::optional<std::vector<ov::Tensor>>& token_type_ids,
+        const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids,
+        const std::optional<std::vector<std::unordered_map<std::string, ov::Tensor>>>& lm_extra_inputs);
 
     std::vector<GenerationResult> generate(const std::vector<std::string>& prompts, const std::vector<ov::genai::GenerationConfig>& sampling_params, const ov::genai::StreamerVariant& streamer=std::monostate{});
     

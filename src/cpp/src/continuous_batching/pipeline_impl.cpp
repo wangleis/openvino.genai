@@ -5,6 +5,7 @@
 #include <thread>
 #include <optional>
 #include "openvino/genai/cache_eviction.hpp"
+#include "openvino/openvino.hpp"
 
 #ifdef __APPLE__
 #include <sys/types.h>
@@ -80,7 +81,9 @@ ContinuousBatchingPipeline::ContinuousBatchingImpl::ContinuousBatchingImpl(
     bool allow_xattention = scheduler_config.use_sparse_attention && scheduler_config.sparse_attention_config.mode == SparseAttentionMode::XATTENTION;
     bool allow_score_aggregation = true;
     bool allow_adaptive_rkv = scheduler_config.use_cache_eviction && scheduler_config.cache_eviction_config.aggregation_mode == AggregationMode::ADAPTIVE_RKV;
+
     ov::pass::SDPAToPagedAttention(is_need_per_layer_cache_control, is_need_per_layer_cache_control, allow_score_aggregation, allow_cache_rotation, allow_xattention, allow_adaptive_rkv).run_on_model(model);
+
     utils::apply_gather_before_matmul_transformation(model);
 
     initialize_pipeline(model, scheduler_config, device, properties);
@@ -100,6 +103,19 @@ ContinuousBatchingPipeline::ContinuousBatchingImpl::ContinuousBatchingImpl(
     m_model_runner->set_inputs_embedder(inputs_embedder);
     m_model_input_type = ModelInputType::EMBEDDINGS;
     m_vision_registry = std::make_shared<VisionRegistry>();
+}
+
+ContinuousBatchingPipeline::ContinuousBatchingImpl::ContinuousBatchingImpl(
+    const std::shared_ptr<ov::Model>& model,
+    EmbeddingsModel::Ptr embeddings_model,
+    const Tokenizer& tokenizer,
+    const SchedulerConfig& scheduler_config,
+    const std::string& device,
+    const ov::AnyMap& properties,
+    const ov::genai::GenerationConfig& generation_config,
+    bool is_validation_mode_enabled) : ContinuousBatchingImpl(model, tokenizer, scheduler_config, device, properties, generation_config, is_validation_mode_enabled){
+    m_model_runner->set_embedding_model(embeddings_model);
+    m_model_input_type = ModelInputType::EMBEDDINGS;
 }
 
 ContinuousBatchingPipeline::ContinuousBatchingImpl::~ContinuousBatchingImpl() {
@@ -286,7 +302,7 @@ ContinuousBatchingPipeline::ContinuousBatchingImpl::add_request(
     OPENVINO_ASSERT(sampling_params_copy.max_length > prompt_len, "'max_length' must be greater than the number of prompt tokens");
 
     std::shared_ptr<SequenceGroup> sequence_group;
-    if (m_model_input_type == ModelInputType::EMBEDDINGS) {
+    if (m_model_input_type == ModelInputType::EMBEDDINGS && m_inputs_embedder) {
         const auto [position_ids, rope_delta] = m_inputs_embedder->get_position_ids(input_ids.get_shape()[1], 0);
         sequence_group = std::make_shared<SequenceGroup>(request_id, 
                                                          input_ids, 
@@ -297,6 +313,19 @@ ContinuousBatchingPipeline::ContinuousBatchingImpl::add_request(
                                                          position_ids, 
                                                          rope_delta,
                                                          prompt_ids);
+    }
+    else if (lm_extra_inputs.has_value() || m_pending_position_ids.has_value()) {
+        sequence_group = std::make_shared<SequenceGroup>(request_id,
+                                                         input_ids,
+                                                         sampling_params_copy,
+                                                         m_block_size,
+                                                         token_type_ids,
+                                                         lm_extra_inputs,
+                                                         m_pending_position_ids,
+                                                         m_pending_rope_delta,
+                                                         prompt_ids);
+        m_pending_position_ids.reset();
+        m_pending_rope_delta.reset();
     }
     else {
         sequence_group = std::make_shared<SequenceGroup>(request_id,
@@ -530,9 +559,14 @@ ContinuousBatchingPipeline::ContinuousBatchingImpl::generate(const std::vector<o
         OPENVINO_ASSERT(1 == input_ids[request_id].get_shape().at(0), "Use multiple tensors to pass a batch.");
         if (position_ids_list.has_value()) {
             const auto [position_ids, rope_delta] = (*position_ids_list)[request_id];
-            m_inputs_embedder->set_position_ids(position_ids);
-            if (rope_delta.has_value()) {
-                m_inputs_embedder->set_rope_delta(*rope_delta);
+            if (m_inputs_embedder) {
+                m_inputs_embedder->set_position_ids(position_ids);
+                if (rope_delta.has_value()) {
+                    m_inputs_embedder->set_rope_delta(*rope_delta);
+                }
+            } else {
+                m_pending_position_ids = position_ids;
+                m_pending_rope_delta = rope_delta;
             }
         }
         const bool has_valid_token_type_ids = token_type_ids.has_value() && request_id < token_type_ids->size();
