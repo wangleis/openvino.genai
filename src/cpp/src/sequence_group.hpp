@@ -7,9 +7,11 @@
 #include <cassert>
 #include <set>
 #include <cstdlib>
+#include <string>
 #include <string_view>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 #include "openvino/genai/generation_handle.hpp"
 #include "openvino/genai/generation_config.hpp"
@@ -324,8 +326,11 @@ class SequenceGroup  : public std::enable_shared_from_this<SequenceGroup> {
     std::vector<std::vector<float>> m_input_embeds;
     std::optional<std::vector<int64_t>> m_token_type_ids;
 
-    ov::Tensor m_deepstack_visual_embeds;
-    std::optional<std::vector<bool>> m_visual_pos_masks;
+    // Generic storage for extra LLM inputs (e.g. deepstack_visual_embeds, visual_pos_masks).
+    // Each tensor is deep-copied from the caller-supplied lm_extra_inputs map.
+    std::unordered_map<std::string, ov::Tensor> m_lm_extra_inputs;
+    // Mutable cache used by get_visual_pos_masks() to reconstruct a stable reference.
+    mutable std::optional<std::vector<bool>> m_visual_pos_masks_cache;
 
     std::vector<float> m_prompt_log_probs;
     GenerationStream::Ptr m_generation_stream;
@@ -420,12 +425,9 @@ public:
 
             if (lm_extra_inputs.has_value()) {
                 for (const auto& [input_name, tensor] : lm_extra_inputs.value()) {
-                    if (input_name == "deepstack_visual_embeds") {
-                        m_deepstack_visual_embeds = ov::Tensor(tensor.get_element_type(), tensor.get_shape());
-                        tensor.copy_to(m_deepstack_visual_embeds);
-                    } else if (input_name == "visual_pos_masks") {
-                        m_visual_pos_masks = std::vector<bool>(tensor.data<const bool>(), tensor.data<const bool>() + tensor.get_size());
-                    }
+                    ov::Tensor copy(tensor.get_element_type(), tensor.get_shape());
+                    tensor.copy_to(copy);
+                    m_lm_extra_inputs[input_name] = std::move(copy);
                 }
             }
             
@@ -731,12 +733,46 @@ public:
 
     const ov::Tensor& get_deepstack_visual_embeds() const {
         OPENVINO_ASSERT(m_sequence_group_type == ov::genai::SequenceGroupType::EMBEDDINGS);
-        return m_deepstack_visual_embeds;
+        static const ov::Tensor empty;
+        auto it = m_lm_extra_inputs.find("deepstack_visual_embeds");
+        if (it == m_lm_extra_inputs.end())
+            return empty;
+        return it->second;
     }
 
     const std::optional<std::vector<bool>>& get_visual_pos_masks() const {
         OPENVINO_ASSERT(m_sequence_group_type == ov::genai::SequenceGroupType::EMBEDDINGS);
-        return m_visual_pos_masks;
+        // Lazily reconstruct the optional<vector<bool>> from the stored tensor.
+        auto it = m_lm_extra_inputs.find("visual_pos_masks");
+        if (it == m_lm_extra_inputs.end()) {
+            static const std::optional<std::vector<bool>> absent;
+            return absent;
+        }
+        // Cache the reconstructed vector so we can return a stable reference.
+        const ov::Tensor& t = it->second;
+        m_visual_pos_masks_cache = std::vector<bool>(t.data<const bool>(), t.data<const bool>() + t.get_size());
+        return m_visual_pos_masks_cache;
+    }
+
+    // --- Generic lm_extra_inputs accessors ---
+
+    /// Returns true if the named extra input was supplied at construction.
+    bool has_lm_extra_input(const std::string& name) const {
+        return m_lm_extra_inputs.count(name) > 0;
+    }
+
+    /// Returns a reference to the stored tensor for the given key.
+    /// Throws if the key is not present.
+    const ov::Tensor& get_lm_extra_input(const std::string& name) const {
+        auto it = m_lm_extra_inputs.find(name);
+        OPENVINO_ASSERT(it != m_lm_extra_inputs.end(),
+            "lm_extra_input key not found: ", name);
+        return it->second;
+    }
+
+    /// Returns the full generic storage map (read-only).
+    const std::unordered_map<std::string, ov::Tensor>& get_all_lm_extra_inputs() const {
+        return m_lm_extra_inputs;
     }
 
     size_t get_hidden_size() const {
