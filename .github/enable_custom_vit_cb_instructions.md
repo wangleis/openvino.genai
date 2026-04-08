@@ -2,7 +2,15 @@
 
 ## Description
 
-扩展 `ContinuousBatchingPipeline`，支持客户自定义 VIT 产出的 `inputs_embeds`，并传入额外 LM 输入（如 `deepstack_embeds.*`、`attention_mask`、`visual_pos_mask`、`beam_idx`）。
+扩展 `ContinuousBatchingPipeline`，支持客户自定义 VIT 产出的 `inputs_embeds`，并传入 deepstack 相关额外输入。
+
+当前已验证可运行的方案：
+
+- 输入主干：`inputs_embeds` + `position_ids`
+- 额外输入仅使用：
+	- `deepstack_visual_embeds`
+	- `visual_pos_masks`
+- 对于 full-seq deepstack（`[L, S, H]`），先基于 `visual_pos_mask` 压缩为稀疏 deepstack（`[L, V, H]`）再传给 CB。
 
 ## Build
 
@@ -45,7 +53,22 @@ cd ~/mygithub/modular_genai/composable_pipeline/thirdparty/openvino.genai
 
 - `inputs_embeds`
 - `position_ids`（可选）
-- `extra_inputs`（如 `deepstack_embeds.*`, `attention_mask`, `visual_pos_mask`, `beam_idx`）
+- `extra_inputs`：
+	- `deepstack_visual_embeds`（推荐稀疏布局 `[L, V, H]`）
+	- `visual_pos_masks`
 
-### 5) 配置要求
+补充：
+
+- sample 默认 `step=0`（若不存在则回退到最新 step）。
+- `SchedulerConfig.max_num_batched_tokens = 1` 为当前稳定配置（已验证可跑通 prefill + generate）。
+
+不建议在该 sample 中把 `attention_mask` / `beam_idx` 作为 `extra_inputs` 透传。
+
+### 5) model_runner deepstack 处理说明（已对齐）
+
+- `model_runner` 已支持通过 `visual_pos_mask(s)` 获取视觉位置并填充 deepstack。
+- deepstack 在 CB 内部按 dense 布局组织并参与后续推理。
+- 输入名兼容 `visual_pos_mask` 与 `visual_pos_masks`。
+
+### 6) 配置要求
 `config.json` 必须包含 `model_type: "modeling_vl"`，以避免 `Unsupported 'xxx' VLM model type`。
