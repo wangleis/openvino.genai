@@ -143,6 +143,12 @@ public:
                    const Tensor* attention_mask,
                    const Tensor* cache_position) const;
 
+    /// Set a collector to receive the per-token all_states snapshot tensor
+    /// produced by the LinearAttention op when snapshot_all_states=true.
+    /// When non-null, forward() will use the 3-output LinearAttention overload.
+    /// Each entry is (layer_idx, tensor) so the host can match outputs to variables.
+    void set_all_states_collector(std::vector<std::pair<int32_t, Tensor>>* collector) { all_states_collector_ = collector; }
+
 private:
     const Tensor& in_proj_qkv_weight() const;
     const Tensor& in_proj_z_weight() const;
@@ -181,6 +187,8 @@ private:
     WeightParameter* dt_bias_param_ = nullptr;
     WeightParameter* norm_param_ = nullptr;
     WeightParameter* out_proj_param_ = nullptr;
+
+    mutable std::vector<std::pair<int32_t, Tensor>>* all_states_collector_ = nullptr;
 };
 
 class Qwen3_5MLP : public Module {
@@ -221,6 +229,8 @@ public:
                                       const std::optional<Tensor>& residual,
                                       const Tensor* precomputed_full_attn_sdpa_mask = nullptr) const;
 
+    Qwen3_5GatedDeltaNet* linear_attn_ptr() { return linear_attn_.get(); }
+
 private:
     std::string layer_type_;
     std::unique_ptr<Qwen3_5Attention> self_attn_;
@@ -253,6 +263,7 @@ public:
                           const Tensor* visual_pos_mask = nullptr);
 
     VocabEmbedding& embed_tokens();
+    std::vector<Qwen3_5DecoderLayer>& layers() { return layers_; }
 
 private:
     Tensor forward_impl(const Tensor* input_ids,
@@ -297,6 +308,29 @@ public:
                           const Tensor* visual_embeds = nullptr,
                           const Tensor* visual_pos_mask = nullptr);
 
+    // Returns {logits, hidden_states_before_lm_head}
+    std::pair<Tensor, Tensor> forward_with_hidden(
+                   const Tensor& input_ids,
+                   const Tensor& position_ids,
+                   const Tensor& beam_idx,
+                   const Tensor& full_attention_mask,
+                   const Tensor* linear_attention_mask,
+                   const Tensor* cache_position,
+                   const Tensor* visual_embeds = nullptr,
+                   const Tensor* visual_pos_mask = nullptr);
+    std::pair<Tensor, Tensor> forward_embeds_with_hidden(
+                          const Tensor& inputs_embeds,
+                          const Tensor& position_ids,
+                          const Tensor& beam_idx,
+                          const Tensor& full_attention_mask,
+                          const Tensor* linear_attention_mask,
+                          const Tensor* cache_position,
+                          const Tensor* visual_embeds = nullptr,
+                          const Tensor* visual_pos_mask = nullptr);
+
+    Qwen3_5Model& model() { return model_; }
+    LMHead& lm_head() { return lm_head_; }
+
 private:
     Qwen3_5TextModelConfig cfg_;
     Qwen3_5Model model_;
@@ -308,7 +342,16 @@ std::shared_ptr<ov::Model> create_qwen3_5_text_model(
     ov::genai::modeling::weights::WeightSource& source,
     ov::genai::modeling::weights::WeightFinalizer& finalizer,
     bool use_inputs_embeds = false,
-    bool enable_visual_inputs = true);
+    bool enable_visual_inputs = true,
+    bool output_hidden_states = false);
+
+/// Build a Qwen3.5 MTP (Multi-Token Prediction) head model.
+/// The MTP model takes input_ids and hidden_states from the main model,
+/// and produces logits for the next-next token (speculative decoding).
+std::shared_ptr<ov::Model> create_qwen3_5_mtp_model(
+    const Qwen3_5Config& cfg,
+    ov::genai::modeling::weights::WeightSource& source,
+    ov::genai::modeling::weights::WeightFinalizer& finalizer);
 
 }  // namespace models
 }  // namespace modeling
