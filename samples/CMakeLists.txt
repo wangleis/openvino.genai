@@ -32,7 +32,6 @@ install(DIRECTORY
             cpp/visual_language_chat
             cpp/whisper_speech_recognition
             cpp/rag
-            cpp/custom_vit_cb
         DESTINATION samples/cpp COMPONENT cpp_samples_genai)
 
 install(DIRECTORY
