@@ -1,7 +1,7 @@
 // Copyright (C) 2023-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-#include "visual_language/modeling_vl/classes.hpp"
+#include "visual_language/dummy_vl/classes.hpp"
 
 #include <numeric>
 
@@ -52,7 +52,7 @@ void fill_position_ids(ov::Tensor& position_ids, size_t history_size) {
 }
 } // namespace
 
-VisionEncoderModelingVL::VisionEncoderModelingVL(
+VisionEncoderDummyVL::VisionEncoderDummyVL(
 	const std::filesystem::path& model_dir,
 	const std::string& device,
 	const ov::AnyMap properties) :
@@ -62,7 +62,7 @@ VisionEncoderModelingVL::VisionEncoderModelingVL(
 	(void)properties;
 }
 
-VisionEncoderModelingVL::VisionEncoderModelingVL(
+VisionEncoderDummyVL::VisionEncoderDummyVL(
 	const ModelsMap& models_map,
 	const std::filesystem::path& config_dir_path,
 	const std::string& device,
@@ -74,26 +74,26 @@ VisionEncoderModelingVL::VisionEncoderModelingVL(
 	(void)properties;
 }
 
-EncodedImage VisionEncoderModelingVL::encode(const ov::Tensor& image, const ov::AnyMap& config_map) {
+EncodedImage VisionEncoderDummyVL::encode(const ov::Tensor& image, const ov::AnyMap& config_map) {
 	(void)image;
 	(void)config_map;
 	return {};
 }
 
-EncodedVideo VisionEncoderModelingVL::encode_frames(const std::vector<ov::Tensor>& frames, const ov::AnyMap& config_map) {
+EncodedVideo VisionEncoderDummyVL::encode_frames(const std::vector<ov::Tensor>& frames, const ov::AnyMap& config_map) {
 	(void)frames;
 	(void)config_map;
 	return {};
 }
 
-InputsEmbedderModelingVL::InputsEmbedderModelingVL(
+InputsEmbedderDummyVL::InputsEmbedderDummyVL(
 	const VLMConfig& vlm_config,
 	const std::filesystem::path& model_dir,
 	const std::string& device,
 	const ov::AnyMap device_config) :
 	IInputsEmbedder(vlm_config, model_dir, device, device_config) { }
 
-InputsEmbedderModelingVL::InputsEmbedderModelingVL(
+InputsEmbedderDummyVL::InputsEmbedderDummyVL(
 	const VLMConfig& vlm_config,
 	const ModelsMap& models_map,
 	const Tokenizer& tokenizer,
@@ -102,7 +102,7 @@ InputsEmbedderModelingVL::InputsEmbedderModelingVL(
 	const ov::AnyMap device_config) :
 	IInputsEmbedder(vlm_config, models_map, tokenizer, config_dir_path, device, device_config) { }
 
-ov::Tensor InputsEmbedderModelingVL::get_inputs_embeds(
+ov::Tensor InputsEmbedderDummyVL::get_inputs_embeds(
 	const std::string& prompt,
 	const std::vector<ov::genai::EncodedImage>& images,
 	ov::genai::VLMPerfMetrics& metrics,
@@ -116,7 +116,7 @@ ov::Tensor InputsEmbedderModelingVL::get_inputs_embeds(
 	return {};
 }
 
-ov::Tensor InputsEmbedderModelingVL::get_inputs_embeds(
+ov::Tensor InputsEmbedderDummyVL::get_inputs_embeds(
 	const std::string& prompt,
 	const std::vector<ov::genai::EncodedImage>& images,
 	const std::vector<ov::genai::EncodedVideo>& videos,
@@ -136,17 +136,17 @@ ov::Tensor InputsEmbedderModelingVL::get_inputs_embeds(
 	return {};
 }
 
-std::vector<ov::genai::EncodedImage> InputsEmbedderModelingVL::encode_images(const std::vector<ov::Tensor>& images) {
+std::vector<ov::genai::EncodedImage> InputsEmbedderDummyVL::encode_images(const std::vector<ov::Tensor>& images) {
 	(void)images;
 	return {};
 }
 
-std::vector<ov::genai::EncodedVideo> InputsEmbedderModelingVL::encode_videos(const std::vector<ov::Tensor>& videos) {
+std::vector<ov::genai::EncodedVideo> InputsEmbedderDummyVL::encode_videos(const std::vector<ov::Tensor>& videos) {
 	(void)videos;
 	return {};
 }
 
-std::pair<ov::Tensor, std::optional<int64_t>> InputsEmbedderModelingVL::get_position_ids(
+std::pair<ov::Tensor, std::optional<int64_t>> InputsEmbedderDummyVL::get_position_ids(
 	const size_t inputs_embeds_size,
 	const size_t history_size) {
 	const bool has_template = !m_position_ids.get_shape().empty();
@@ -157,7 +157,7 @@ std::pair<ov::Tensor, std::optional<int64_t>> InputsEmbedderModelingVL::get_posi
 	return {position_ids, std::nullopt};
 }
 
-std::pair<ov::Tensor, std::optional<int64_t>> InputsEmbedderModelingVL::get_generation_phase_position_ids(
+std::pair<ov::Tensor, std::optional<int64_t>> InputsEmbedderDummyVL::get_generation_phase_position_ids(
 	const size_t inputs_embeds_size,
 	const size_t history_size,
 	int64_t rope_delta) {
@@ -165,17 +165,17 @@ std::pair<ov::Tensor, std::optional<int64_t>> InputsEmbedderModelingVL::get_gene
 	return get_position_ids(inputs_embeds_size, history_size);
 }
 
-void InputsEmbedderModelingVL::start_chat(const std::string& system_message) {
+void InputsEmbedderDummyVL::start_chat(const std::string& system_message) {
 	(void)system_message;
 }
 
-std::string InputsEmbedderModelingVL::get_last_pruned_prompt(const std::string& original_prompt) const {
+std::string InputsEmbedderDummyVL::get_last_pruned_prompt(const std::string& original_prompt) const {
 	return original_prompt;
 }
 
-void InputsEmbedderModelingVL::finish_chat() { }
+void InputsEmbedderDummyVL::finish_chat() { }
 
-NormalizedPrompt InputsEmbedderModelingVL::normalize_prompt(
+NormalizedPrompt InputsEmbedderDummyVL::normalize_prompt(
 	const std::string& prompt,
 	size_t image_base_id,
 	size_t video_base_id,
@@ -188,7 +188,7 @@ NormalizedPrompt InputsEmbedderModelingVL::normalize_prompt(
 	return {prompt, {}, {}};
 }
 
-void InputsEmbedderModelingVL::expand_video_tags_in_prompt(
+void InputsEmbedderDummyVL::expand_video_tags_in_prompt(
 	std::string& unified_prompt,
 	const std::vector<EncodedVideo>& encoded_videos,
 	const std::vector<size_t>& videos_sequence,
@@ -199,7 +199,7 @@ void InputsEmbedderModelingVL::expand_video_tags_in_prompt(
 	(void)video_base_id;
 }
 
-std::pair<ov::Tensor, ov::Tensor> InputsEmbedderModelingVL::run_video_image_embeddings_merger(
+std::pair<ov::Tensor, ov::Tensor> InputsEmbedderDummyVL::run_video_image_embeddings_merger(
 	const std::vector<EncodedImage>& images,
 	const std::vector<size_t>& images_sequence,
 	const std::vector<EncodedVideo>& videos,
@@ -211,12 +211,12 @@ std::pair<ov::Tensor, ov::Tensor> InputsEmbedderModelingVL::run_video_image_embe
 	return {ov::Tensor{}, ov::Tensor{}};
 }
 
-ov::Tensor InputsEmbedderModelingVL::get_rotary_pos_emb(const std::vector<std::array<size_t, 3>>& grids_thw) const {
+ov::Tensor InputsEmbedderDummyVL::get_rotary_pos_emb(const std::vector<std::array<size_t, 3>>& grids_thw) const {
 	(void)grids_thw;
 	return {};
 }
 
-std::vector<std::array<size_t, 3>> InputsEmbedderModelingVL::get_vision_grid_thw_for_position_ids(
+std::vector<std::array<size_t, 3>> InputsEmbedderDummyVL::get_vision_grid_thw_for_position_ids(
 	const std::vector<std::array<size_t, 3>>& images_grid_thw,
 	const std::vector<size_t>& images_sequence,
 	const size_t image_id,

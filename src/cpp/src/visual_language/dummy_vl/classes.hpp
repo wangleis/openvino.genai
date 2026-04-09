@@ -1,9 +1,9 @@
 // Copyright (C) 2023-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// For modeling VL, VisonEncoder and InputsEmbedder are implemented by customer self, here we just update some params in
-// the second token inference of ContinuesBatching. So the modeling VL classes are implemented in separate files(do nothing for pure
-// virtual functions) to make it clear and avoid affecting other models.
+// For dummy VL, VisionEncoder and InputsEmbedder are implemented by customer self.
+// The dummy VL classes only handle generic config and generation-time metadata updates in ContinuousBatching,
+// and intentionally do not implement model-specific embedding behavior.
 #pragma once
 
 #include <filesystem>
@@ -17,10 +17,10 @@
 
 namespace ov::genai {
 
-class VisionEncoderModelingVL : public VisionEncoder {
+class VisionEncoderDummyVL : public VisionEncoder {
 public:
-	explicit VisionEncoderModelingVL(const std::filesystem::path& model_dir, const std::string& device, const ov::AnyMap properties);
-	explicit VisionEncoderModelingVL(const ModelsMap& models_map, const std::filesystem::path& config_dir_path, const std::string& device, const ov::AnyMap properties);
+	explicit VisionEncoderDummyVL(const std::filesystem::path& model_dir, const std::string& device, const ov::AnyMap properties);
+	explicit VisionEncoderDummyVL(const ModelsMap& models_map, const std::filesystem::path& config_dir_path, const std::string& device, const ov::AnyMap properties);
 
 	EncodedImage encode(const ov::Tensor& image, const ov::AnyMap& config_map) override;
 	EncodedVideo encode_frames(const std::vector<ov::Tensor>& frames, const ov::AnyMap& config_map) override;
@@ -57,15 +57,15 @@ private:
 	bool use_ov_vision_preprocess = true; // default use ov vision preprocess, control by env VISION_PREPROCESS=CPP to use cpp vision preprocess
 };
 
-class InputsEmbedderModelingVL : public InputsEmbedder::IInputsEmbedder {
+class InputsEmbedderDummyVL : public InputsEmbedder::IInputsEmbedder {
 public:
-	InputsEmbedderModelingVL(
+	InputsEmbedderDummyVL(
 		const VLMConfig& vlm_config,
 		const std::filesystem::path& model_dir,
 		const std::string& device,
 		const ov::AnyMap device_config);
 
-	InputsEmbedderModelingVL(
+	InputsEmbedderDummyVL(
 		const VLMConfig& vlm_config,
 		const ModelsMap& models_map,
 		const Tokenizer& tokenizer, 

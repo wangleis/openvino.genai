@@ -20,7 +20,7 @@
 #include "visual_language/llava_next_video/classes.hpp"
 #include "visual_language/internvl_chat/classes.hpp"
 #include "visual_language/gemma3/classes.hpp"
-#include "visual_language/modeling_vl/classes.hpp"
+#include "visual_language/dummy_vl/classes.hpp"
 
 #include "utils.hpp"
 
@@ -285,7 +285,7 @@ InputsEmbedder::InputsEmbedder(const std::filesystem::path& model_dir,
     } else if (vlm_config.model_type == VLMModelType::GEMMA3) {
         m_impl = std::make_shared<InputsEmbedderGemma3>(vlm_config, model_dir, device, device_config);
     } else if (vlm_config.model_type == VLMModelType::DUMMY_VL) {
-        m_impl = std::make_shared<InputsEmbedderModelingVL>(vlm_config, model_dir, device, device_config);
+        m_impl = std::make_shared<InputsEmbedderDummyVL>(vlm_config, model_dir, device, device_config);
     } else {
         OPENVINO_THROW("Unsupported model type in VLM InputsEmbedder class. Please, create feature request on new model support");
     }
@@ -298,7 +298,7 @@ InputsEmbedder::InputsEmbedder(const ModelsMap& models_map,
                                const ov::AnyMap device_config) {
     auto vlm_config = utils::from_config_json_if_exists<VLMConfig>(config_dir_path, "config.json");
 
-    // Check if pass null vision_embeds model in models_map. If so, call InputsEmbedderModelingVL(it is dummy).
+    // Check if pass null vision_embeds model in models_map. If so, call InputsEmbedderDummyVL (it is dummy).
     bool is_dummy_vl = std::any_of(models_map.begin(), models_map.end(), [](const auto& model_pair) {
         return model_pair.first == "vision_embeddings" && model_pair.second.first.empty();
     });
@@ -328,7 +328,7 @@ InputsEmbedder::InputsEmbedder(const ModelsMap& models_map,
     } else if (vlm_config.model_type == VLMModelType::GEMMA3) {
         m_impl = std::make_shared<InputsEmbedderGemma3>(vlm_config, models_map, tokenizer, config_dir_path, device, device_config);
     } else if (vlm_config.model_type == VLMModelType::DUMMY_VL || is_dummy_vl) {
-        m_impl = std::make_shared<InputsEmbedderModelingVL>(vlm_config, models_map, tokenizer, config_dir_path, device, device_config);
+        m_impl = std::make_shared<InputsEmbedderDummyVL>(vlm_config, models_map, tokenizer, config_dir_path, device, device_config);
     } else {
         OPENVINO_THROW("Unsupported model type in VLM InputsEmbedder class. Please, create feature request on new model support");
     }
