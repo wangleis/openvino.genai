@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <algorithm>
+#include <cstdint>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
@@ -20,7 +21,35 @@
 #include "openvino/genai/continuous_batching_pipeline.hpp"
 #include "openvino/genai/generation_config.hpp"
 #include "openvino/genai/scheduler_config.hpp"
+#include "openvino/genai/tokenizer.hpp"
 #include "openvino/runtime/tensor.hpp"
+
+std::string read_text_file(const std::filesystem::path& file_path) {
+    std::ifstream file(file_path);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open text file: " + file_path.string());
+    }
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+ov::Tensor read_binary_as_u8_tensor(const std::filesystem::path& file_path) {
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open binary file: " + file_path.string());
+    }
+    const std::streamoff file_size = file.tellg();
+    if (file_size < 0) {
+        throw std::runtime_error("Failed to get file size for: " + file_path.string());
+    }
+    file.seekg(0, std::ios::beg);
+
+    ov::Tensor weights(ov::element::u8, {static_cast<size_t>(file_size)});
+    file.read(reinterpret_cast<char*>(weights.data<uint8_t>()), file_size);
+    if (!file) {
+        throw std::runtime_error("Failed to read binary file: " + file_path.string());
+    }
+    return weights;
+}
 
 ov::Tensor load_tensor(const std::string& tensor_stem) {
     auto trim = [](std::string value) {
@@ -258,9 +287,28 @@ int main(int argc, char* argv[]) {
     scheduler_config.enable_prefix_caching = false;
     scheduler_config.max_num_batched_tokens = 1;
 
+    ov::genai::ModelsMap models_map;
+    models_map["language"] = {
+        read_text_file(model_dir / "openvino_language_model.xml"),
+        read_binary_as_u8_tensor(model_dir / "openvino_language_model.bin")
+    };
+    models_map["text_embeddings"] = {
+        read_text_file(model_dir / "openvino_text_embeddings_model.xml"),
+        read_binary_as_u8_tensor(model_dir / "openvino_text_embeddings_model.bin")
+    };
+    models_map["vision_embeddings"] = {
+        std::string(),
+        ov::Tensor()};  // dummy vision embed model to trigger modeling VL code path in InputsEmbedder.
+    const ov::genai::Tokenizer tokenizer(model_dir);
+
     const ov::AnyMap props;
-    auto m_pipeline =
-        std::make_unique<ov::genai::ContinuousBatchingPipeline>(model_dir, scheduler_config, device, props);
+    auto m_pipeline = std::make_unique<ov::genai::ContinuousBatchingPipeline>(
+        models_map,
+        tokenizer,
+        scheduler_config,
+        device,
+        model_dir,
+        props);
 
     ov::genai::GenerationConfig generation_config;
     generation_config.max_new_tokens = 64;
@@ -274,8 +322,7 @@ int main(int argc, char* argv[]) {
 
     std::string text;
     if (!results.empty() && !results[0].m_generation_ids.empty() && !results[0].m_generation_ids[0].empty()) {
-        ov::genai::Tokenizer tokenizer = m_pipeline->get_tokenizer();
-        text = tokenizer.decode(results[0].m_generation_ids[0]);
+        text = m_pipeline->get_tokenizer().decode(results[0].m_generation_ids[0]);
     }
     std::cout << "Generated text: " << text << std::endl;
 

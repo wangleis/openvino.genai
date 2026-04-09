@@ -199,6 +199,10 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
     auto properties_without_draft_model = properties;
     auto draft_model_desr = utils::extract_draft_model_from_config(properties_without_draft_model);
     auto is_prompt_lookup_enabled = extract_prompt_lookup_from_config(properties_without_draft_model);
+    auto eagle_rt_info = utils::eagle3::extract_eagle3_info_from_config(
+        draft_model_desr.properties,
+        embedder_config_dir_path.value_or(std::filesystem::path{})
+    );
     auto model_pair = utils::get_model_weights_pair(models_map, "language");
     auto model = utils::singleton_core().read_model(model_pair.first, model_pair.second);
 
@@ -207,7 +211,7 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
     std::shared_ptr<InputsEmbedder> embedder = nullptr;
     if (embedder_config_dir_path.has_value()) {
         auto path = *embedder_config_dir_path;
-        embedder = std::make_shared<InputsEmbedder>(models_map, tokenizer, path, device, properties);
+        embedder = std::make_shared<InputsEmbedder>(models_map, tokenizer, path, device, properties_without_draft_model);
     }
     else if (rt_info.find("__weights_path") != rt_info.end()) {
         std::string weights_path = rt_info.at("__weights_path").as<std::string>();
@@ -223,6 +227,10 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
         OPENVINO_ASSERT(draft_model_desr.model == nullptr, "Speculative decoding and prompt lookup decoding are mutually exclusive");
         OPENVINO_ASSERT(embedder == nullptr, "Prompt lookup decoding is not supported for models with embeddings");
         m_impl = std::make_shared<PromptLookupImpl>(model, tokenizer, scheduler_config, device, properties_without_draft_model, generation_config);
+    } else if (draft_model_desr.model != nullptr && eagle_rt_info.eagle3_mode) {
+        OPENVINO_ASSERT(embedder == nullptr, "Eagle speculative decoding is not supported for models with embeddings");
+        auto main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model, scheduler_config, generation_config);
+        m_impl = std::make_shared<Eagle3DecodingImpl>(main_model_descr, draft_model_desr, eagle_rt_info.hidden_layers_list);
     } else if (draft_model_desr.model != nullptr) {
         OPENVINO_ASSERT(embedder == nullptr, "Speculative decoding is not supported for models with embeddings");
         auto main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model, scheduler_config, generation_config);

@@ -36,14 +36,15 @@ cd ~/mygithub/modular_genai/composable_pipeline/thirdparty/openvino.genai
 - [src/cpp/src/visual_language/modeling_vl/classes.hpp](src/cpp/src/visual_language/modeling_vl/classes.hpp)
 - [src/cpp/src/visual_language/modeling_vl/classes.cpp](src/cpp/src/visual_language/modeling_vl/classes.cpp)
 
-### 2) ModelingVL model_type 支持
-新增 `model_type: "modeling_vl"` 以绕开已有模型类型约束：
+### 2) DummyVL model_type 支持
+新增 `model_type: "dummy_vl"` 以绕开已有模型类型约束：
 
-- `VLMModelType` 新增 `MODELING_VL`
-- `vlm_config.cpp` 中加入 `{"modeling_vl", VLMModelType::MODELING_VL}`
+- `VLMModelType` 新增 `DUMMY_VL`
+- `vlm_config.cpp` 中加入 `{"dummy_vl", VLMModelType::DUMMY_VL}`
+- 兼容旧值：`{"modeling_vl", VLMModelType::DUMMY_VL}`
 
 ### 3) VisionEncoder/InputsEmbedder 选择
-支持 `MODELING_VL`：
+支持 `DUMMY_VL`：
 
 - [src/cpp/src/visual_language/vision_encoder.cpp](src/cpp/src/visual_language/vision_encoder.cpp)
 - [src/cpp/src/visual_language/inputs_embedder.cpp](src/cpp/src/visual_language/inputs_embedder.cpp)
@@ -71,4 +72,4 @@ cd ~/mygithub/modular_genai/composable_pipeline/thirdparty/openvino.genai
 - 输入名兼容 `visual_pos_mask` 与 `visual_pos_masks`。
 
 ### 6) 配置要求
-`config.json` 必须包含 `model_type: "modeling_vl"`，以避免 `Unsupported 'xxx' VLM model type`。
+`config.json` 建议包含 `model_type: "dummy_vl"`

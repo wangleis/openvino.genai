@@ -56,14 +56,23 @@ VisionEncoderModelingVL::VisionEncoderModelingVL(
 	const std::filesystem::path& model_dir,
 	const std::string& device,
 	const ov::AnyMap properties) :
-	VisionEncoder(model_dir, device, properties) { }
+	VisionEncoder() {
+	(void)model_dir;
+	(void)device;
+	(void)properties;
+}
 
 VisionEncoderModelingVL::VisionEncoderModelingVL(
 	const ModelsMap& models_map,
 	const std::filesystem::path& config_dir_path,
 	const std::string& device,
 	const ov::AnyMap properties) :
-	VisionEncoder(models_map, config_dir_path, device, properties) { }
+	VisionEncoder() {
+	(void)models_map;
+	(void)config_dir_path;
+	(void)device;
+	(void)properties;
+}
 
 EncodedImage VisionEncoderModelingVL::encode(const ov::Tensor& image, const ov::AnyMap& config_map) {
 	(void)image;
