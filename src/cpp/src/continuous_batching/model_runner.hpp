@@ -157,16 +157,10 @@ struct DeepstackContext {
                         deepstack_group_data.vision_tokens_offset++;
                     }
                 }
-
-                // Count vision tokens within the scheduled window.
-                for (size_t j = 0; j < num_scheduled_tokens; ++j) {
-                    const size_t pos = group_position_id + j;
-                    if (pos < prompt_len && pos < mask->size() && (*mask)[pos]) {
-                        // Counted implicitly while scattering in fill_deepstack_visual_embeds().
-                    }
-                }
             }
 
+            // Keep token-space accounting aligned with scheduled LM tokens.
+            // Visual-token filtering is handled during scattering in fill_deepstack_visual_embeds().
             total_scheduled_tokens += num_scheduled_tokens * num_sequences;
         }
         deepstack_group_data_list.push_back(deepstack_group_data);
