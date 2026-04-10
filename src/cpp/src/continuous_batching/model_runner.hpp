@@ -101,13 +101,16 @@ struct HiddenStateRange {
  */
 struct DeepstackContext {
     struct DeepstackGroupData {
-        size_t scheduled_vision_tokens_num = 0;
+        size_t num_scheduled_tokens = 0;
         size_t vision_tokens_offset = 0;
+        size_t prompt_len = 0;
+        size_t group_position_id = 0;
+        bool use_full_sequence_deepstack = false;
     };
 
     std::vector<DeepstackGroupData> deepstack_group_data_list;
     size_t deepstack_layers_num = 0;
-    size_t total_scheduled_vision_tokens = 0;
+    size_t total_scheduled_tokens = 0;
     size_t deepstack_embeds_write_offset = 0;
     bool have_deepstack_visual_inputs = false;
 
@@ -123,6 +126,7 @@ struct DeepstackContext {
 
         const size_t num_sequences = sequence_group->num_running_seqs();
         const auto& deepstack_shape = sequence_group->get_deepstack_visual_embeds().get_shape();
+        OPENVINO_ASSERT(deepstack_shape.size() == 3, "deepstack_visual_embeds rank must be 3");
         if (deepstack_layers_num == 0) {
             deepstack_layers_num = deepstack_shape[0];
         } else {
@@ -136,23 +140,28 @@ struct DeepstackContext {
             const size_t num_scheduled_tokens = sequence_group->get_num_scheduled_tokens();
             const size_t group_position_id = sequence_group->get_num_processed_tokens();
             const size_t prompt_len = sequence_group->get_prompt_len();
+            const size_t deepstack_token_dim = deepstack_shape[1];
 
-            // Count vision tokens before the scheduled window
-            for (size_t pos = 0; pos < group_position_id && pos < mask->size(); ++pos) {
-                if ((*mask)[pos]) {
-                    deepstack_group_data.vision_tokens_offset++;
+            deepstack_group_data.num_scheduled_tokens = num_scheduled_tokens;
+            deepstack_group_data.group_position_id = group_position_id;
+            deepstack_group_data.prompt_len = prompt_len;
+
+            if (deepstack_token_dim == prompt_len) {
+                // Full-sequence deepstack format: deepstack width equals prompt length.
+                deepstack_group_data.use_full_sequence_deepstack = true;
+            } else {
+                // Compact deepstack format: deepstack width equals number of visual tokens only.
+                // Count vision tokens before the scheduled window.
+                for (size_t pos = 0; pos < group_position_id && pos < mask->size(); ++pos) {
+                    if ((*mask)[pos]) {
+                        deepstack_group_data.vision_tokens_offset++;
+                    }
                 }
             }
 
-            // Count vision tokens within the scheduled window
-            for (size_t j = 0; j < num_scheduled_tokens; ++j) {
-                const size_t pos = group_position_id + j;
-                if (pos < prompt_len && pos < mask->size() && (*mask)[pos]) {
-                    deepstack_group_data.scheduled_vision_tokens_num++;
-                }
-            }
-
-            total_scheduled_vision_tokens += deepstack_group_data.scheduled_vision_tokens_num * num_sequences;
+            // Keep token-space accounting aligned with scheduled LM tokens.
+            // Visual-token filtering is handled during scattering in fill_deepstack_visual_embeds().
+            total_scheduled_tokens += num_scheduled_tokens * num_sequences;
         }
         deepstack_group_data_list.push_back(deepstack_group_data);
     }
@@ -170,29 +179,64 @@ struct DeepstackContext {
 
         const auto& deepstack_group_data = deepstack_group_data_list[group_index];
 
-        if (total_scheduled_vision_tokens == 0) {
-            OPENVINO_ASSERT(deepstack_visual_embeds.get_shape()[1] == 1,
-                "Unexpected deepstack_visual_embeds shape when no vision tokens are scheduled");
-        } else if (deepstack_group_data.scheduled_vision_tokens_num > 0) {
-            const auto& deepstack = sequence_group->get_deepstack_visual_embeds();
-            
-            const float* src = deepstack.data<const float>();
-            const size_t src_vision_tokens_num = deepstack.get_shape()[1];
-            float* dst = deepstack_visual_embeds.data<float>();
+        const size_t num_scheduled_tokens = deepstack_group_data.num_scheduled_tokens;
+        if (num_scheduled_tokens == 0) {
+            return;
+        }
 
-            // Copy block of vision tokens within scheduled window per each deepstack layer
-            const size_t vision_tokens_copy_num = deepstack_group_data.scheduled_vision_tokens_num;
-            for (size_t seq_idx = 0; seq_idx < num_running_sequences; ++seq_idx) {
-                for (size_t layer = 0; layer < deepstack_layers_num; ++layer) {
-                    const size_t src_offset = layer * src_vision_tokens_num * hidden_size
-                                            + deepstack_group_data.vision_tokens_offset * hidden_size;
-                    const size_t dst_offset = layer * total_scheduled_vision_tokens * hidden_size
-                                            + (deepstack_embeds_write_offset + seq_idx * vision_tokens_copy_num) * hidden_size;
-                    std::copy_n(src + src_offset, vision_tokens_copy_num * hidden_size, dst + dst_offset);
+        const auto& deepstack = sequence_group->get_deepstack_visual_embeds();
+        const auto& mask_opt = sequence_group->get_visual_pos_masks();
+        OPENVINO_ASSERT(mask_opt.has_value(), "visual_pos_masks are required for deepstack_visual_embeds");
+        const auto& mask = mask_opt.value();
+
+        const float* src = deepstack.data<const float>();
+        const size_t src_vision_tokens_num = deepstack.get_shape()[1];
+        const size_t total_token_count = deepstack_visual_embeds.get_shape()[1];
+        float* dst = deepstack_visual_embeds.data<float>();
+
+        std::vector<size_t> source_token_idx(num_scheduled_tokens, std::numeric_limits<size_t>::max());
+        size_t compact_token_offset = deepstack_group_data.vision_tokens_offset;
+
+        for (size_t j = 0; j < num_scheduled_tokens; ++j) {
+            const size_t pos = deepstack_group_data.group_position_id + j;
+            if (pos >= deepstack_group_data.prompt_len || pos >= mask.size() || !mask[pos]) {
+                continue;
+            }
+
+            if (deepstack_group_data.use_full_sequence_deepstack) {
+                source_token_idx[j] = pos;
+            } else {
+                source_token_idx[j] = compact_token_offset;
+                compact_token_offset++;
+            }
+        }
+
+        if (!deepstack_group_data.use_full_sequence_deepstack) {
+            OPENVINO_ASSERT(compact_token_offset <= src_vision_tokens_num,
+                            "Deepstack source bounds exceeded while filling deepstack_visual_embeds");
+        }
+
+        for (size_t seq_idx = 0; seq_idx < num_running_sequences; ++seq_idx) {
+            for (size_t layer = 0; layer < deepstack_layers_num; ++layer) {
+                for (size_t j = 0; j < num_scheduled_tokens; ++j) {
+                    const size_t src_token_idx = source_token_idx[j];
+                    if (src_token_idx == std::numeric_limits<size_t>::max()) {
+                        continue;
+                    }
+                    OPENVINO_ASSERT(src_token_idx < src_vision_tokens_num,
+                                    "Deepstack source token index is out of bounds");
+
+                    const size_t src_offset = (layer * src_vision_tokens_num + src_token_idx) * hidden_size;
+                    const size_t dst_token_idx = deepstack_embeds_write_offset + seq_idx * num_scheduled_tokens + j;
+                    OPENVINO_ASSERT(dst_token_idx < total_token_count,
+                                    "Deepstack destination token index is out of bounds");
+                    const size_t dst_offset = (layer * total_token_count + dst_token_idx) * hidden_size;
+                    std::copy_n(src + src_offset, hidden_size, dst + dst_offset);
                 }
             }
-            deepstack_embeds_write_offset += vision_tokens_copy_num * num_running_sequences;
         }
+
+        deepstack_embeds_write_offset += num_scheduled_tokens * num_running_sequences;
     }
 };
 
@@ -409,6 +453,7 @@ public:
         bool *visual_pos_masks_data = nullptr;
 
         ov::Tensor position_ids;
+        std::string visual_pos_input_name;
         if (sequence_group_type == SequenceGroupType::EMBEDDINGS) {
             inputs_embeds_data = inputs_embeds.data<float>();
             token_type_ids_data = token_type_ids.data<int64_t>();
@@ -423,18 +468,28 @@ public:
             position_ids = _get_or_resize_tensor(m_cached_position_ids, "position_ids", position_ids_shape, ov::element::i64);
 
             if (deepstack_context.have_deepstack_visual_inputs) {
+                try {
+                    std::ignore = m_request.get_tensor("visual_pos_masks");
+                    visual_pos_input_name = "visual_pos_masks";
+                } catch (const ov::Exception&) {
+                    std::ignore = m_request.get_tensor("visual_pos_mask");
+                    visual_pos_input_name = "visual_pos_mask";
+                }
+
                 const ov::Shape deepstack_embeds_shape{
                     deepstack_context.deepstack_layers_num,
-                    std::max(deepstack_context.total_scheduled_vision_tokens, size_t(1)),
+                    std::max(deepstack_context.total_scheduled_tokens, size_t(1)),
                     hidden_size
                 };
                 deepstack_visual_embeds = _get_or_resize_tensor(m_cached_deepstack_visual_embeds, "deepstack_visual_embeds",
                     deepstack_embeds_shape, ov::element::f32);
                 
                 std::fill_n(deepstack_visual_embeds.data<float>(), deepstack_visual_embeds.get_size(), 0.0f);
+
+                const ov::Shape visual_pos_masks_shape{total_num_tokens, 1};
                 
-                visual_pos_masks = _get_or_resize_tensor(m_cached_visual_pos_masks, "visual_pos_masks",
-                    {1, total_num_tokens}, ov::element::boolean);
+                visual_pos_masks = _get_or_resize_tensor(m_cached_visual_pos_masks, visual_pos_input_name,
+                    visual_pos_masks_shape, ov::element::boolean);
 
                 visual_pos_masks_data = visual_pos_masks.data<bool>();
                 std::fill_n(visual_pos_masks_data, total_num_tokens, false);
@@ -677,7 +732,7 @@ public:
                 }
 
                 if (!m_cached_visual_pos_masks) {
-                    m_request.set_tensor("visual_pos_masks", visual_pos_masks);
+                    m_request.set_tensor(visual_pos_input_name, visual_pos_masks);
                 }
             }
         }

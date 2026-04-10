@@ -3,6 +3,7 @@
 
 #include "vlm_config.hpp"
 #include "json_utils.hpp"
+#include "logger.hpp"
 
 #include <fstream>
 
@@ -24,6 +25,8 @@ VLMModelType to_vlm_model_type(const std::string& value) {
         {"qwen2_vl", VLMModelType::QWEN2_VL},
         {"qwen2_5_vl", VLMModelType::QWEN2_5_VL},
         {"qwen3_vl", VLMModelType::QWEN3_VL},
+        {"dummy_vl", VLMModelType::DUMMY_VL},  // For empty vision embed model case, to trigger modeling VL code path in
+                                               // InputsEmbedder.
         {"gemma3", VLMModelType::GEMMA3},
     };
 
@@ -31,7 +34,9 @@ VLMModelType to_vlm_model_type(const std::string& value) {
     if (it != model_types_map.end()) {
         return it->second;
     }
-    OPENVINO_THROW("Unsupported '", value, "' VLM model type");
+    // fallback to dummy
+    GENAI_WARN("Unrecognized model type '", value, "' in config. Falling back to DUMMY_VL which has no embed-specific behavior.");
+    return VLMModelType::DUMMY_VL;
 }
 
 void assert_size(size_t size, VLMModelType model_type) {

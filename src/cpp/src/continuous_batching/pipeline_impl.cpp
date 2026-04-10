@@ -530,9 +530,13 @@ ContinuousBatchingPipeline::ContinuousBatchingImpl::generate(const std::vector<o
         OPENVINO_ASSERT(1 == input_ids[request_id].get_shape().at(0), "Use multiple tensors to pass a batch.");
         if (position_ids_list.has_value()) {
             const auto [position_ids, rope_delta] = (*position_ids_list)[request_id];
-            m_inputs_embedder->set_position_ids(position_ids);
+            if (m_inputs_embedder) {
+                m_inputs_embedder->set_position_ids(position_ids);
+            }
             if (rope_delta.has_value()) {
-                m_inputs_embedder->set_rope_delta(*rope_delta);
+                if (m_inputs_embedder) {
+                    m_inputs_embedder->set_rope_delta(*rope_delta);
+                }
             }
         }
         const bool has_valid_token_type_ids = token_type_ids.has_value() && request_id < token_type_ids->size();

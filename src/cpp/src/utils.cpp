@@ -361,7 +361,11 @@ void apply_gather_before_matmul_transformation(std::shared_ptr<ov::Model> model)
 }
 
 ov::Core& singleton_core() {
-    static ov::Core core;
+    static ov::Core core = []() {
+        ov::Core core;
+        core.get_versions("CPU");
+        return core;
+    }();
     return core;
 }
 
