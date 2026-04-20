@@ -149,6 +149,8 @@ std::vector<ov::genai::EncodedVideo> InputsEmbedderDummyVL::encode_videos(const 
 std::pair<ov::Tensor, std::optional<int64_t>> InputsEmbedderDummyVL::get_position_ids(
 	const size_t inputs_embeds_size,
 	const size_t history_size) {
+	OPENVINO_ASSERT(m_position_ids, "Position ids tensor is not initialized in InputsEmbedderDummyVL.");
+
 	const bool has_template = !m_position_ids.get_shape().empty();
 	const ov::Shape shape = has_template ? get_position_ids_shape(m_position_ids, inputs_embeds_size)
 	                                    : ov::Shape{1, inputs_embeds_size};

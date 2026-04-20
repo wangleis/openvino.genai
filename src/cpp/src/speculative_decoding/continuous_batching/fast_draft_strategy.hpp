@@ -33,6 +33,7 @@ std::vector<EncodedGenerationResult> generate_common(
     const std::vector<GenerationConfig>& sampling_params,
     const StreamerVariant& streamer,
     std::optional<std::vector<ov::Tensor>> token_type_ids,
+    const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids,
     std::optional<std::vector<ov::Tensor>> prompt_ids,
     const std::optional<std::vector<std::unordered_map<std::string, ov::Tensor>>>& lm_extra_inputs_list,
     GenerateStrategy& strategy) {
@@ -41,6 +42,9 @@ std::vector<EncodedGenerationResult> generate_common(
     OPENVINO_ASSERT(!self->has_non_finished_requests(),
                     "Generate cannot be called while ContinuousBatchingPipeline is already running");
     OPENVINO_ASSERT(input_ids.size() == sampling_params.size());
+    if (position_ids.has_value()) {
+        OPENVINO_ASSERT(position_ids->size() == input_ids.size());
+    }
 
     auto t_start = strategy.start_timer();
 
@@ -64,6 +68,14 @@ std::vector<EncodedGenerationResult> generate_common(
         strategy.prepare_request(rid, input_ids[rid],
                                 main_cfg, draft_cfg,
                                 main_in, draft_in);
+
+        if (position_ids.has_value() && self->m_inputs_embedder) {
+            const auto [position_ids_tensor, rope_delta] = (*position_ids)[rid];
+            self->m_inputs_embedder->set_position_ids(position_ids_tensor);
+            if (rope_delta.has_value()) {
+                self->m_inputs_embedder->set_rope_delta(*rope_delta);
+            }
+        }
 
         const bool has_valid_token_type_ids = token_type_ids.has_value() && rid < token_type_ids->size();
         const bool has_valid_prompt_ids = prompt_ids.has_value() && rid < prompt_ids->size();
@@ -172,6 +184,7 @@ public:
             const std::vector<GenerationConfig>& sampling_params,
             const StreamerVariant& streamer,
             std::optional<std::vector<ov::Tensor>> token_type_ids,
+            const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids,
             std::optional<std::vector<ov::Tensor>> prompt_ids,
             const std::optional<std::vector<std::unordered_map<std::string, ov::Tensor>>>& lm_extra_inputs_list,
             GenerateStrategy& strategy);
