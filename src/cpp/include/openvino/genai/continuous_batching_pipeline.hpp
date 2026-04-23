@@ -22,6 +22,10 @@
 
 #include "openvino/genai/cache_eviction.hpp"
 
+namespace ov {
+class Core;
+}
+
 namespace ov::genai {
 
 /**
@@ -66,6 +70,17 @@ struct PipelineMetrics {
      */
     size_t kv_cache_size_in_bytes = 0;
 };
+
+/**
+ * @brief Imports a caller-owned OpenVINO core for openvino.genai internal operations.
+ *
+ * This is an opt-in API. When not used, openvino.genai keeps the existing default behavior.
+ * Passing `nullptr` resets the behavior back to the internal default core.
+ *
+ * The imported core should be configured before pipeline construction and should not be swapped
+ * concurrently with active pipeline/model creation.
+ */
+OPENVINO_GENAI_EXPORTS void import_external_core(std::shared_ptr<ov::Core> core);
 
 class OPENVINO_GENAI_EXPORTS ContinuousBatchingPipeline {
 protected:

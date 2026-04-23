@@ -22,11 +22,24 @@
 
 #include "sampling/sampler.hpp"
 
+namespace {
+
+std::shared_ptr<ov::Core>& imported_external_core() {
+    static std::shared_ptr<ov::Core> core;
+    return core;
+}
+
+}  // namespace
+
 namespace ov {
 
 namespace genai {
 const std::string PA_BACKEND = "PA";
 const std::string SDPA_BACKEND = "SDPA";
+
+void import_external_core(std::shared_ptr<ov::Core> core) {
+    imported_external_core() = std::move(core);
+}
 }
 }
 
@@ -345,6 +358,10 @@ void apply_gather_before_matmul_transformation(std::shared_ptr<ov::Model> model)
 }
 
 ov::Core& singleton_core() {
+    if (auto core = imported_external_core()) {
+        return *core;
+    }
+
     static ov::Core core = []() {
         ov::Core core;
         core.get_versions("CPU");
