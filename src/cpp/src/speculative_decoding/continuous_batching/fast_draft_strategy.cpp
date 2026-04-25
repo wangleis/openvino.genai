@@ -34,6 +34,8 @@ ContinuousBatchingPipeline::SpeculativeDecodingImpl::init_speculative_models(con
     OPENVINO_ASSERT(draft_model != nullptr, "Draft model cannot be null");
 
     auto main_scheduler_config = main_model_desc.scheduler_config;
+    const auto dflash_it = draft_model_desc.properties.find("dflash_mode");
+    const bool is_dflash_mode = (dflash_it != draft_model_desc.properties.end()) && dflash_it->second.as<bool>();
     bool allow_score_aggregation = true;
     bool allow_xattention = false;
 
@@ -41,20 +43,24 @@ ContinuousBatchingPipeline::SpeculativeDecodingImpl::init_speculative_models(con
                                    main_model_desc.scheduler_config.use_cache_eviction,
                                    allow_score_aggregation,
                                    allow_xattention).run_on_model(main_model);
-    ov::pass::SDPAToPagedAttention(main_model_desc.scheduler_config.use_cache_eviction,
-                                   main_model_desc.scheduler_config.use_cache_eviction,
-                                   allow_score_aggregation,
-                                   allow_xattention).run_on_model(draft_model);
+    if (!is_dflash_mode) {
+        ov::pass::SDPAToPagedAttention(main_model_desc.scheduler_config.use_cache_eviction,
+                                       main_model_desc.scheduler_config.use_cache_eviction,
+                                       allow_score_aggregation,
+                                       allow_xattention).run_on_model(draft_model);
+    }
 
     utils::apply_gather_before_matmul_transformation(main_model);
-    utils::apply_gather_before_matmul_transformation(draft_model);
+    if (!is_dflash_mode) {
+        utils::apply_gather_before_matmul_transformation(draft_model);
+    }
 
     bool is_draft_scheduler_undefined = draft_model_desc.scheduler_config == SchedulerConfig();
 
     ov::genai::SchedulerConfig main_scheduler_config_updated = main_scheduler_config,
                                draft_scheduler_config = is_draft_scheduler_undefined ? main_scheduler_config : draft_model_desc.scheduler_config;
 
-    if (is_draft_scheduler_undefined) {
+    if (is_draft_scheduler_undefined && !is_dflash_mode) {
         // split KV cache to 2 caches for main and draft models
         auto compute_total_hidden_size = [] (const std::shared_ptr<ov::Model>& model) -> size_t {
             size_t total_hidden_size = 0;
@@ -94,6 +100,8 @@ ContinuousBatchingPipeline::SpeculativeDecodingImpl::init_speculative_models(con
 ContinuousBatchingPipeline::SpeculativeDecodingImpl::SpeculativeDecodingImpl(const ov::genai::ModelDesc& main_model_desc,
                                                                              const ov::genai::ModelDesc& draft_model_desc) {
     auto scheduler_configs = init_speculative_models(main_model_desc, draft_model_desc);
+    const auto dflash_it = draft_model_desc.properties.find("dflash_mode");
+    const bool is_dflash_mode = (dflash_it != draft_model_desc.properties.end()) && dflash_it->second.as<bool>();
 
     auto main_device = main_model_desc.device;
     std::string draft_device = draft_model_desc.device.empty() ? main_model_desc.device : draft_model_desc.device;
@@ -103,9 +111,18 @@ ContinuousBatchingPipeline::SpeculativeDecodingImpl::SpeculativeDecodingImpl(con
     Tokenizer draft_model_tokenizer = draft_model_desc.tokenizer;
 
     // todo: remove this condition after support of CVS-154103
-    OPENVINO_ASSERT(are_tokenizers_equal(main_model_tokenizer, draft_model_tokenizer), "Tokenizers for draft and main models are different!");
+    // DFlash draft artifacts may omit tokenizer encode assets; in that case we intentionally
+    // skip tokenizer equality probing and rely on the main tokenizer for user-facing decode.
+    if (!is_dflash_mode) {
+        OPENVINO_ASSERT(are_tokenizers_equal(main_model_tokenizer, draft_model_tokenizer),
+                        "Tokenizers for draft and main models are different!");
+    }
     m_tokenizer = main_model_tokenizer;
     ov::AnyMap draft_properties = draft_model_desc.properties.empty() ? main_model_desc.properties : draft_model_desc.properties;
+    if (is_dflash_mode) {
+        draft_properties["skip_sdpa_to_paged_attention"] = true;
+    }
+    draft_properties.erase("dflash_mode");
     // to create `main_pipeline` with enabled validation_mode and `draft_pipeline` with disabled validation mode
     m_main_pipeline = std::make_shared<ContinuousBatchingForSpeculativeDecodingImpl>(
         main_model_desc.model, main_model_tokenizer, main_model_desc.generation_config,

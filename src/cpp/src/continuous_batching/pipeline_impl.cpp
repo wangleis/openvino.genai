@@ -75,15 +75,31 @@ ContinuousBatchingPipeline::ContinuousBatchingImpl::ContinuousBatchingImpl(
     m_generation_config = generation_config;
     m_is_validation_mode_enabled = is_validation_mode_enabled;
 
+    ov::AnyMap runtime_properties = properties;
+    bool skip_sdpa_to_paged_attention = false;
+    auto skip_it = runtime_properties.find("skip_sdpa_to_paged_attention");
+    if (skip_it != runtime_properties.end()) {
+        skip_sdpa_to_paged_attention = skip_it->second.as<bool>();
+        runtime_properties.erase(skip_it);
+    }
+
     bool is_need_per_layer_cache_control = scheduler_config.use_cache_eviction;
     bool allow_cache_rotation = scheduler_config.cache_eviction_config.apply_rotation;
     bool allow_xattention = scheduler_config.use_sparse_attention && scheduler_config.sparse_attention_config.mode == SparseAttentionMode::XATTENTION;
     bool allow_score_aggregation = true;
     bool allow_adaptive_rkv = scheduler_config.use_cache_eviction && scheduler_config.cache_eviction_config.aggregation_mode == AggregationMode::ADAPTIVE_RKV;
-    ov::pass::SDPAToPagedAttention(is_need_per_layer_cache_control, is_need_per_layer_cache_control, allow_score_aggregation, allow_cache_rotation, allow_xattention, allow_adaptive_rkv).run_on_model(model);
-    utils::apply_gather_before_matmul_transformation(model);
+    if (!skip_sdpa_to_paged_attention) {
+        ov::pass::SDPAToPagedAttention(is_need_per_layer_cache_control,
+                                       is_need_per_layer_cache_control,
+                                       allow_score_aggregation,
+                                       allow_cache_rotation,
+                                       allow_xattention,
+                                       allow_adaptive_rkv)
+            .run_on_model(model);
+        utils::apply_gather_before_matmul_transformation(model);
+    }
 
-    initialize_pipeline(model, scheduler_config, device, properties);
+    initialize_pipeline(model, scheduler_config, device, runtime_properties);
 }
 
 ContinuousBatchingPipeline::ContinuousBatchingImpl::ContinuousBatchingImpl(
@@ -130,6 +146,10 @@ void ContinuousBatchingPipeline::ContinuousBatchingImpl::initialize_pipeline(
     m_device = device;
     // apply LoRA
     auto filtered_properties = extract_adapters_from_properties(properties, &m_generation_config.adapters);
+    auto skip_pa_it = filtered_properties->find("skip_sdpa_to_paged_attention");
+    if (skip_pa_it != filtered_properties->end()) {
+        filtered_properties.fork().erase("skip_sdpa_to_paged_attention");
+    }
     if (m_generation_config.adapters) {
         m_generation_config.adapters->set_tensor_name_prefix("base_model.model.");
         m_adapter_controller = AdapterController(model, *m_generation_config.adapters, device);   // TODO: Make the prefix name configurable
