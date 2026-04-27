@@ -12,6 +12,7 @@
 
 #include "llm/pipeline_stateful.hpp"
 #include "llm/pipeline_continuous_batching_adapter.hpp"
+#include "speculative_decoding/dflash_model_transforms.hpp"
 #include "speculative_decoding/eagle3_model_transforms.hpp"
 #include "speculative_decoding/stateful/eagle3_strategy.hpp"
 #include "speculative_decoding/stateful/fast_draft_strategy.hpp"
@@ -158,6 +159,16 @@ static std::unique_ptr<LLMPipelineImplBase> create(const std::shared_ptr<ov::Mod
         OPENVINO_ASSERT(device == "NPU" || draft_model_descr.device == "NPU",
                         "Stateful FastDraft and Stateful Eagle3 Speculative Decoding require NPU to be "
                         "the execution device for at least one model.");
+
+        auto dflash_rt_info = utils::dflash::extract_dflash_info_from_config(draft_model_descr.properties, models_path);
+        const bool is_dflash_mode = dflash_rt_info.dflash_mode;
+        if (is_dflash_mode) {
+            if (!dflash_rt_info.hidden_layers_to_abstract.empty()) {
+                draft_model_descr.properties["hidden_layers_list"] = dflash_rt_info.hidden_layers_to_abstract;
+            }
+            // Initial stateful DFlash implementation reuses the validated stateful speculative loop.
+            return std::make_unique<StatefulSpeculativeLLMPipeline>(main_model_descr, draft_model_descr);
+        }
 
         // Check if Eagle3 mode is enabled in draft model properties
         bool is_eagle3_mode = draft_model_descr.properties.find("eagle3_mode") != draft_model_descr.properties.end() &&

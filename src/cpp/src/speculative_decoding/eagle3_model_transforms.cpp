@@ -30,6 +30,10 @@ Eagle3RTInfo extract_eagle3_info_from_config(ov::AnyMap& config, const std::file
     if (config.find("eagle3_mode") != config.end()) {
         eagle_rt_info.eagle3_mode = config.at("eagle3_mode").as<bool>();
         config.erase("eagle3_mode");
+        if (!eagle_rt_info.eagle3_mode) {
+            return eagle_rt_info;
+        }
+
         auto it = config.find("hidden_layers_list");
         if (it != config.end()) {
             OPENVINO_ASSERT(it->second.is<std::vector<int32_t>>(),
@@ -237,8 +241,8 @@ void transform_hidden_state(std::shared_ptr<ov::Model>& model, const std::vector
         return;
     }
     OPENVINO_ASSERT(
-        hidden_layers_to_abstract.size() == 3 || hidden_layers_to_abstract.size() == 1,
-        "Expected exactly 1 or 3 hidden layers for extraction: 1 for draft model, 3 for main model (early/middle/late stages)."
+        hidden_layers_to_abstract.size() == 3 || hidden_layers_to_abstract.size() == 1 || hidden_layers_to_abstract.size() == 5,
+        "Expected exactly 1, 3, or 5 hidden layers for extraction: 1 for draft model, 3 for main model (early/middle/late stages), 5 for extended main model."
     );
 
     std::vector<std::string> patterns;

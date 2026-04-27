@@ -15,6 +15,7 @@
 #include "speculative_decoding/continuous_batching/eagle3_strategy.hpp"
 #include "speculative_decoding/continuous_batching/dflash_strategy.hpp"
 #include "speculative_decoding/continuous_batching/fast_draft_strategy.hpp"
+#include "speculative_decoding/dflash_model_transforms.hpp"
 #include "speculative_decoding/eagle3_model_transforms.hpp"
 #include "utils.hpp"
 #include "model_desc.hpp"
@@ -35,16 +36,6 @@ extract_prompt_lookup_from_config(ov::AnyMap& config) {
     return res;
 }
 
-bool extract_dflash_from_config(ov::AnyMap& config) {
-    bool res = false;
-    auto it = config.find("dflash_mode");
-    if (it != config.end()) {
-        res = it->second.as<bool>();
-        config.erase(it);
-    }
-    return res;
-}
-
 float get_load_time(std::chrono::steady_clock::time_point start_time) {
     auto stop_time = std::chrono::steady_clock::now();
     return std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
@@ -60,9 +51,13 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline( const std::filesystem::p
     auto start_time = std::chrono::steady_clock::now();
     auto properties_without_draft_model = properties;
     auto draft_model_desr = ov::genai::extract_draft_model_from_config(properties_without_draft_model);
-    const bool is_dflash_mode = extract_dflash_from_config(draft_model_desr.properties);
+    auto dflash_rt_info = utils::dflash::extract_dflash_info_from_config(draft_model_desr.properties, models_path);
+    const bool is_dflash_mode = dflash_rt_info.dflash_mode;
     if (is_dflash_mode) {
         draft_model_desr.properties["dflash_mode"] = true;
+        draft_model_desr.properties["hidden_layers_list"] = dflash_rt_info.hidden_layers_to_abstract;
+        // remove hidden_layers_list from properties as well to avoid confusion, since it's not a direct property for model loading but for runtime behavior
+        properties_without_draft_model.erase("hidden_layers_list");
     }
     auto is_prompt_lookup_enabled = extract_prompt_lookup_from_config(properties_without_draft_model);
     auto eagle_rt_info = utils::eagle3::extract_eagle3_info_from_config(draft_model_desr.properties, models_path);
@@ -94,7 +89,9 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline( const std::filesystem::p
         } else {
             main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model_without_gguf, scheduler_config, generation_config);
         }
-        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr, draft_model_desr);
+        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr,
+                                  draft_model_desr,
+                                  dflash_rt_info.hidden_layers_to_abstract);
     } else if (draft_model_desr.model != nullptr && eagle_rt_info.eagle3_mode) {
         ov::genai::ModelDesc main_model_descr;
         if (embedder) {
@@ -106,7 +103,9 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline( const std::filesystem::p
     } else if (draft_model_desr.model != nullptr) {
         OPENVINO_ASSERT(embedder == nullptr, "Speculative decoding is not supported for models with embeddings");
         auto main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model_without_gguf, scheduler_config, generation_config);
-        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr, draft_model_desr);
+        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr,
+                                  draft_model_desr,
+                                  dflash_rt_info.hidden_layers_to_abstract);
     } else if (embedder) {
         m_impl = std::make_shared<ContinuousBatchingImpl>(model, embedder, tokenizer, scheduler_config, device, properties_without_draft_model_without_gguf, generation_config);
     }
@@ -126,9 +125,13 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
     auto start_time = std::chrono::steady_clock::now();
     auto properties_without_draft_model = properties;
     auto draft_model_desr = ov::genai::extract_draft_model_from_config(properties_without_draft_model);
-    const bool is_dflash_mode = extract_dflash_from_config(draft_model_desr.properties);
+    auto dflash_rt_info = utils::dflash::extract_dflash_info_from_config(draft_model_desr.properties, models_path);
+    const bool is_dflash_mode = dflash_rt_info.dflash_mode;
     if (is_dflash_mode) {
         draft_model_desr.properties["dflash_mode"] = true;
+        draft_model_desr.properties["hidden_layers_list"] = dflash_rt_info.hidden_layers_to_abstract;
+        // remove hidden_layers_list from properties as well to avoid confusion, since it's not a direct property for model loading but for runtime behavior
+        properties_without_draft_model.erase("hidden_layers_list");
     }
     auto is_prompt_lookup_enabled = extract_prompt_lookup_from_config(properties_without_draft_model);
     auto eagle_rt_info = utils::eagle3::extract_eagle3_info_from_config(draft_model_desr.properties, models_path);
@@ -155,7 +158,9 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
         } else {
             main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model_without_gguf, scheduler_config, generation_config);
         }
-        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr, draft_model_desr);
+        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr,
+                                  draft_model_desr,
+                                  dflash_rt_info.hidden_layers_to_abstract);
     } else if (draft_model_desr.model != nullptr && eagle_rt_info.eagle3_mode) {
         ov::genai::ModelDesc main_model_descr;
         if (embedder) {
@@ -167,7 +172,9 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
     } else if (draft_model_desr.model != nullptr) {
         OPENVINO_ASSERT(embedder == nullptr, "Speculative decoding is not supported for models with embeddings");
         auto main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model_without_gguf, scheduler_config, generation_config);
-        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr, draft_model_desr);
+        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr,
+                                  draft_model_desr,
+                                  dflash_rt_info.hidden_layers_to_abstract);
     } else if (embedder) {
         m_impl = std::make_shared<ContinuousBatchingImpl>(model, embedder, tokenizer, scheduler_config, device, properties_without_draft_model_without_gguf, generation_config);
     } else {
@@ -189,9 +196,14 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
 
     auto properties_without_draft_model = properties;
     auto draft_model_desr = ov::genai::extract_draft_model_from_config(properties_without_draft_model);
-    const bool is_dflash_mode = extract_dflash_from_config(draft_model_desr.properties);
+    auto dflash_rt_info = utils::dflash::extract_dflash_info_from_config(draft_model_desr.properties,
+                                                                          std::filesystem::path(model_str));
+    const bool is_dflash_mode = dflash_rt_info.dflash_mode;
     if (is_dflash_mode) {
         draft_model_desr.properties["dflash_mode"] = true;
+        draft_model_desr.properties["hidden_layers_list"] = dflash_rt_info.hidden_layers_to_abstract;
+        // remove hidden_layers_list from properties as well to avoid confusion, since it's not a direct property for model loading but for runtime behavior
+        properties_without_draft_model.erase("hidden_layers_list");
     }
     auto is_prompt_lookup_enabled = extract_prompt_lookup_from_config(properties_without_draft_model);
     auto eagle_rt_info = utils::eagle3::extract_eagle3_info_from_config(draft_model_desr.properties, std::filesystem::path(model_str));
@@ -216,7 +228,9 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
         m_impl = std::make_shared<PromptLookupImpl>(model, tokenizer, scheduler_config, device, properties_without_draft_model, generation_config);
     } else if (draft_model_desr.model != nullptr && is_dflash_mode) {
         auto main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model, scheduler_config, generation_config);
-        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr, draft_model_desr);
+        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr,
+                                  draft_model_desr,
+                                  dflash_rt_info.hidden_layers_to_abstract);
     } else if (draft_model_desr.model != nullptr && eagle_rt_info.eagle3_mode) {
         OPENVINO_ASSERT(embedder == nullptr, "Eagle speculative decoding is not supported for models with embeddings");
         auto main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model, scheduler_config, generation_config);
@@ -246,9 +260,16 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
 
     auto properties_without_draft_model = properties;
     auto draft_model_desr = ov::genai::extract_draft_model_from_config(properties_without_draft_model);
-    const bool is_dflash_mode = extract_dflash_from_config(draft_model_desr.properties);
+    auto dflash_rt_info = utils::dflash::extract_dflash_info_from_config(
+        draft_model_desr.properties,
+        embedder_config_dir_path.value_or(std::filesystem::path{})
+    );
+    const bool is_dflash_mode = dflash_rt_info.dflash_mode;
     if (is_dflash_mode) {
         draft_model_desr.properties["dflash_mode"] = true;
+        draft_model_desr.properties["hidden_layers_list"] = dflash_rt_info.hidden_layers_to_abstract;
+        // remove hidden_layers_list from properties as well to avoid confusion, since it's not a direct property for model loading but for runtime behavior
+        properties_without_draft_model.erase("hidden_layers_list");
     }
     auto is_prompt_lookup_enabled = extract_prompt_lookup_from_config(properties_without_draft_model);
     auto eagle_rt_info = utils::eagle3::extract_eagle3_info_from_config(
@@ -289,7 +310,9 @@ ContinuousBatchingPipeline::ContinuousBatchingPipeline(
         } else {
             main_model_descr = ov::genai::ModelDesc(model, tokenizer, device, properties_without_draft_model, scheduler_config, generation_config);
         }
-        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr, draft_model_desr);
+        m_impl = std::make_shared<DFlashDecodingImpl>(main_model_descr,
+                                  draft_model_desr,
+                                  dflash_rt_info.hidden_layers_to_abstract);
     } else if (draft_model_desr.model != nullptr && eagle_rt_info.eagle3_mode) {
         ov::genai::ModelDesc main_model_descr;
         if (embedder) {
