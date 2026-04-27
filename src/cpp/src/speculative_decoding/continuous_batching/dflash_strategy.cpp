@@ -352,6 +352,17 @@ ContinuousBatchingPipeline::DFlashDecodingImpl::DFlashDecodingImpl(const ov::gen
     m_main_generation_config = main_model_desc.generation_config;
     m_hidden_layers_to_abstract = hidden_layers_to_abstract;
 
+    if (const auto mask_it = draft_model_desc.properties.find("mask_token_id");
+        mask_it != draft_model_desc.properties.end()) {
+        if (mask_it->second.is<int64_t>()) {
+            m_draft_mask_token_id = mask_it->second.as<int64_t>();
+        } else if (mask_it->second.is<int32_t>()) {
+            m_draft_mask_token_id = static_cast<int64_t>(mask_it->second.as<int32_t>());
+        } else if (mask_it->second.is<size_t>()) {
+            m_draft_mask_token_id = static_cast<int64_t>(mask_it->second.as<size_t>());
+        }
+    }
+
     auto main_model = m_main_model;
     OPENVINO_ASSERT(main_model != nullptr, "Main model cannot be null for DFlashDecodingImpl");
 
@@ -738,8 +749,11 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
         block_size = 16;
     }
 
+    const int64_t mask_token_id =
+        m_draft_mask_token_id >= 0 ? m_draft_mask_token_id : (sampling_params.eos_token_id >= 0 ? sampling_params.eos_token_id : -1);
+
     const size_t max_length = prompt_len + max_new_tokens;
-    std::vector<int64_t> output_ids(max_length + block_size, sampling_params.eos_token_id >= 0 ? sampling_params.eos_token_id : -1);
+    std::vector<int64_t> output_ids(max_length + block_size, mask_token_id);
     if (!is_embedding_prefill) {
         const int64_t* prompt_ptr = input_ids.data<const int64_t>();
         std::copy(prompt_ptr, prompt_ptr + prompt_len, output_ids.begin());
@@ -786,7 +800,7 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
 
         block_ptr[0] = output_ids[start];
         for (size_t i = 1; i < current_block_size; ++i) {
-            block_ptr[i] = sampling_params.eos_token_id >= 0 ? sampling_params.eos_token_id : 0;
+            block_ptr[i] = mask_token_id;
         }
 
         std::optional<ov::Tensor> block_input_embeds = std::nullopt;
@@ -882,8 +896,9 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
         trim_main_kv_cache(tokens_to_trim, start + current_block_size);
         target_hidden = slice_hidden_prefix(block_hidden.value(), accepted_len);
 
-        if (direct_iteration_idx < 5) {
-            GENAI_INFO("DFLASH_DIRECT_ITER mode=inputs_embeds iter=%zu block=%zu proposed=%zu acceptance_len=%zu accepted_len=%zu draft_accepted=%zu rejected=%zu trim=%zu, start=%zu", 
+        // if (direct_iteration_idx < 5) {
+        GENAI_INFO("DFLASH_DIRECT_ITER mode=inputs_embeds iter=%zu block=%zu proposed=%zu acceptance_len=%zu "
+                   "accepted_len=%zu draft_accepted=%zu rejected=%zu trim=%zu, start=%zu",
                    direct_iteration_idx,
                    current_block_size,
                    draft_candidates_proposed,
@@ -893,7 +908,7 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
                    draft_candidates_rejected,
                    tokens_to_trim,
                    start);
-        }
+        // }
 
         const auto iteration_end = std::chrono::steady_clock::now();
         const auto iteration_duration_us =
@@ -931,9 +946,19 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
 
     std::vector<int64_t> generated_ids;
     if (sampling_params.echo) {
-        generated_ids.assign(output_ids.begin(), output_ids.begin() + end_pos);
+        generated_ids.reserve(end_pos);
+        for (size_t i = 0; i < end_pos; ++i) {
+            if (output_ids[i] != mask_token_id) {
+                generated_ids.push_back(output_ids[i]);
+            }
+        }
     } else {
-        generated_ids.assign(output_ids.begin() + prompt_len, output_ids.begin() + end_pos);
+        generated_ids.reserve(end_pos - prompt_len);
+        for (size_t i = prompt_len; i < end_pos; ++i) {
+            if (output_ids[i] != mask_token_id) {
+                generated_ids.push_back(output_ids[i]);
+            }
+        }
     }
 
     EncodedGenerationResult result;
@@ -1242,10 +1267,46 @@ int64_t ContinuousBatchingPipeline::DFlashDecodingImpl::greedy_pick_last_token(c
     OPENVINO_ASSERT(position_idx < shape[1], "position_idx is out of range for logits tensor");
 
     const size_t vocab_size = shape[2];
-    const float* data = logits.data<const float>();
-    const float* row = data + position_idx * vocab_size;
-    const auto max_it = std::max_element(row, row + vocab_size);
-    return static_cast<int64_t>(std::distance(row, max_it));
+    const auto et = logits.get_element_type();
+
+    if (et == ov::element::f32) {
+        const float* data = logits.data<const float>();
+        const float* row = data + position_idx * vocab_size;
+        const auto max_it = std::max_element(row, row + vocab_size);
+        return static_cast<int64_t>(std::distance(row, max_it));
+    }
+
+    if (et == ov::element::f16) {
+        const ov::float16* data = logits.data<const ov::float16>();
+        const ov::float16* row = data + position_idx * vocab_size;
+        size_t best_idx = 0;
+        float best_val = static_cast<float>(row[0]);
+        for (size_t i = 1; i < vocab_size; ++i) {
+            const float v = static_cast<float>(row[i]);
+            if (v > best_val) {
+                best_val = v;
+                best_idx = i;
+            }
+        }
+        return static_cast<int64_t>(best_idx);
+    }
+
+    if (et == ov::element::bf16) {
+        const ov::bfloat16* data = logits.data<const ov::bfloat16>();
+        const ov::bfloat16* row = data + position_idx * vocab_size;
+        size_t best_idx = 0;
+        float best_val = static_cast<float>(row[0]);
+        for (size_t i = 1; i < vocab_size; ++i) {
+            const float v = static_cast<float>(row[i]);
+            if (v > best_val) {
+                best_val = v;
+                best_idx = i;
+            }
+        }
+        return static_cast<int64_t>(best_idx);
+    }
+
+    OPENVINO_THROW("Unsupported logits element type in DFlash greedy pick: ", et.to_string());
 }
 
 ov::Tensor ContinuousBatchingPipeline::DFlashDecodingImpl::build_i64_arange_row(size_t start, size_t length) {

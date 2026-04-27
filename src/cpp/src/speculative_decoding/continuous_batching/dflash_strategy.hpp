@@ -36,6 +36,7 @@ protected:
     size_t m_main_logits_output_index = 0;
     size_t m_main_hidden_output_index = std::numeric_limits<size_t>::max();
     size_t m_draft_logits_output_index = 0;
+    int64_t m_draft_mask_token_id = 151669;
     std::vector<int32_t> m_hidden_layers_to_abstract;
     std::map<uint64_t, DFlashPendingRequest> m_dflash_pending_requests;
 
