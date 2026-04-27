@@ -168,8 +168,10 @@ protected:
     void reset_generate_metrics() {
         m_sd_metrics = SpeculativeDecodingMetrics();
         m_perf_metrics = ov::genai::SDPerModelsPerfMetrics();
-        m_draft_pipeline->raw_perf_metrics = RawPerfMetrics{};
-        m_draft_pipeline->raw_perf_metrics.m_inference_durations = {{ MicroSeconds(0.0f) }};
+        if (m_draft_pipeline) {
+            m_draft_pipeline->raw_perf_metrics = RawPerfMetrics{};
+            m_draft_pipeline->raw_perf_metrics.m_inference_durations = {{MicroSeconds(0.0f)}};
+        }
     }
 
     void drop_requests();

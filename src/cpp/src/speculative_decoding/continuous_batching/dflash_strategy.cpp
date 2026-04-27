@@ -11,6 +11,7 @@
 #include <sstream>
 #include <unordered_set>
 
+#include "openvino/op/transpose.hpp"
 #include "openvino/op/scaled_dot_product_attention.hpp"
 #include "openvino/pass/sdpa_to_paged_attention.hpp"
 #include "speculative_decoding/dflash_model_transforms.hpp"
@@ -108,6 +109,35 @@ std::string shape_to_string(const ov::Shape& shape) {
     }
     oss << "]";
     return oss.str();
+}
+
+void remove_deepstack_transpose(const std::shared_ptr<ov::Model>& model) {
+    if (!model) {
+        return;
+    }
+
+    bool updated = false;
+    for (const auto& node : model->get_ordered_ops()) {
+        auto transpose = ov::as_type_ptr<ov::op::v1::Transpose>(node);
+        if (!transpose) {
+            continue;
+        }
+        const std::string name = transpose->get_friendly_name();
+        if (name.rfind("deepstack_aligned_", 0) != 0) {
+            continue;
+        }
+        const ov::Output<ov::Node> source = transpose->input_value(0);
+        for (auto& output : transpose->outputs()) {
+            for (auto target_input : output.get_target_inputs()) {
+                target_input.replace_source_output(source);
+            }
+        }
+        updated = true;
+    }
+
+    if (updated) {
+        model->validate_nodes_and_infer_types();
+    }
 }
 
 ov::Tensor adapt_position_ids_to_input(const ov::Tensor& position_ids, const ov::Output<ov::Node>& position_input) {
@@ -328,9 +358,11 @@ ContinuousBatchingPipeline::DFlashDecodingImpl::DFlashDecodingImpl(const ov::gen
     if (main_model_desc.inputs_embedder) {
         m_main_direct_model = m_main_direct_model->clone();
         utils::dflash::transform_hidden_state(m_main_direct_model, m_hidden_layers_to_abstract);
+        remove_deepstack_transpose(m_main_direct_model);
     }
 
     utils::dflash::transform_hidden_state(main_model, m_hidden_layers_to_abstract);
+    remove_deepstack_transpose(main_model);
 
     if (has_sdpa_nodes(main_model)) {
         bool allow_score_aggregation = true;
@@ -573,112 +605,58 @@ ContinuousBatchingPipeline::DFlashDecodingImpl::generate(
     const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids,
     const std::optional<std::vector<ov::Tensor>>& prompt_ids,
     const std::optional<std::vector<std::unordered_map<std::string, ov::Tensor>>>& lm_extra_inputs_list) {
-    GenerateStrategy strategy;
-    strategy.prepare_request = [this](size_t,
-                                      const ov::Tensor& in_ids,
-                                      GenerationConfig& main_cfg,
-                                      GenerationConfig& draft_cfg,
-                                      ov::Tensor& main_in,
-                                      ov::Tensor& draft_in) {
-        if (main_cfg.assistant_confidence_threshold == 0.f && main_cfg.num_assistant_tokens == 0) {
-            main_cfg.num_assistant_tokens = m_main_pipeline->default_num_assistant_tokens;
-        }
-        draft_cfg.ignore_eos = true;
-        draft_cfg.stop_strings = {};
-        main_in = in_ids;
-        draft_in = in_ids;
-    };
-
-    strategy.check_streaming = [](const std::shared_ptr<ThreadedStreamerWrapper>& streamer_ptr,
-                                  const std::vector<ov::Tensor>& ids,
-                                  const std::vector<GenerationConfig>& cfgs) {
-        OPENVINO_ASSERT(!streamer_ptr->has_callback() ||
-                            (ids.size() == 1 && (cfgs[0].is_greedy_decoding() || cfgs[0].is_multinomial())),
-                        "Streaming only supports batch size=1 with greedy/multinomial");
-    };
-    strategy.start_timer = []() {
-        return std::chrono::steady_clock::now();
-    };
-    strategy.stop_timer = [](const TimePoint& start) {
-        return PerfMetrics::get_microsec(std::chrono::steady_clock::now() - start);
-    };
-
-    return generate_common(this,
-                           input_ids,
-                           sampling_params,
-                           streamer,
-                           token_type_ids,
-                           position_ids,
-                           prompt_ids,
-                           lm_extra_inputs_list,
-                           strategy);
-}
-
-bool ContinuousBatchingPipeline::DFlashDecodingImpl::should_use_direct_block_decode(
-    const std::vector<ov::Tensor>& input_ids,
-    const std::vector<GenerationConfig>& sampling_params,
-    const StreamerVariant& streamer,
-    const std::optional<std::vector<ov::Tensor>>& token_type_ids,
-    const std::optional<std::vector<std::pair<ov::Tensor, std::optional<int64_t>>>>& position_ids,
-    const std::optional<std::vector<ov::Tensor>>& prompt_ids,
-    const std::optional<std::vector<std::unordered_map<std::string, ov::Tensor>>>& lm_extra_inputs_list) const {
     if (!m_direct_dflash_ready) {
-        return false;
+        OPENVINO_THROW("DFlash direct block decode is not ready; check main/draft model outputs and required ports.");
     }
-
-    if (input_ids.size() != 1 || sampling_params.size() != 1) {
-        return false;
-    }
-
-    if (!sampling_params[0].is_greedy_decoding()) {
-        return false;
-    }
-
     if (!std::holds_alternative<std::monostate>(streamer)) {
-        return false;
+        OPENVINO_THROW("DFlash direct block decode does not support streaming callbacks.");
     }
-
+    if (!sampling_params.empty() && !sampling_params.front().is_greedy_decoding()) {
+        OPENVINO_THROW("DFlash direct block decode requires greedy decoding.");
+    }
     if (token_type_ids.has_value() && !token_type_ids->empty()) {
-        return false;
+        OPENVINO_THROW("DFlash direct block decode does not support token_type_ids.");
     }
+    OPENVINO_ASSERT(input_ids.size() == 1 && sampling_params.size() == 1,
+                    "DFlash direct block decode supports batch size=1");
 
-    if (lm_extra_inputs_list.has_value() && lm_extra_inputs_list->size() != 1) {
-        return false;
-    }
-
-    const auto& input = input_ids[0];
+    const auto& input = input_ids.front();
     const bool is_token_id_input =
         input.get_element_type() == ov::element::i64 && input.get_shape().size() == 2 && input.get_shape()[0] == 1;
     const bool is_embedding_input =
         (input.get_element_type() == ov::element::f16 || input.get_element_type() == ov::element::f32) &&
         input.get_shape().size() == 3 && input.get_shape()[0] == 1;
     if (!is_token_id_input && !is_embedding_input) {
-        return false;
+        OPENVINO_THROW("DFlash direct block decode expects input_ids or inputs_embeds with batch size 1.");
     }
 
-    // TODO(dflash): multimodal direct path with embedding prefill is temporarily disabled,
-    // because this flow currently uses main model runtime assumptions that don't match the
-    // SDPA->PagedAttention execution path in this integration.
-    if (is_embedding_input) {
-        return false;
+    std::optional<ov::Tensor> token_type_id = std::nullopt;
+    if (token_type_ids.has_value() && !token_type_ids->empty()) {
+        token_type_id = token_type_ids->front();
     }
-
+    std::optional<std::pair<ov::Tensor, std::optional<int64_t>>> position_id = std::nullopt;
     if (position_ids.has_value() && !position_ids->empty()) {
-        return false;
+        position_id = position_ids->front();
     }
+    std::optional<ov::Tensor> prompt_id = std::nullopt;
     if (prompt_ids.has_value() && !prompt_ids->empty()) {
-        return false;
+        prompt_id = prompt_ids->front();
+    }
+    std::optional<std::unordered_map<std::string, ov::Tensor>> lm_extra_inputs = std::nullopt;
+    if (lm_extra_inputs_list.has_value() && !lm_extra_inputs_list->empty()) {
+        lm_extra_inputs = lm_extra_inputs_list->front();
     }
 
-    if (!m_inputs_embedder) {
-        return false;
-    }
-    auto emb_model = m_inputs_embedder->get_embedding_model();
-    if (!emb_model) {
-        return false;
-    }
-
-    return true;
+    std::vector<EncodedGenerationResult> results;
+    results.reserve(1);
+    results.emplace_back(direct_block_decode_generate(input_ids.front(),
+                                                      sampling_params.front(),
+                                                      streamer,
+                                                      token_type_id,
+                                                      position_id,
+                                                      prompt_id,
+                                                      lm_extra_inputs));
+    return results;
 }
 
 EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_block_decode_generate(
@@ -753,9 +731,12 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
 
     size_t block_size = sampling_params.num_assistant_tokens;
     if (block_size == 0) {
-        block_size = 5;
+        block_size = 16;
     }
-    block_size = std::max<size_t>(2, block_size);
+    if (block_size != 16) {
+        GENAI_WARN("DFLASH block_size must be 16 for direct mode; overriding requested=%zu", block_size);
+        block_size = 16;
+    }
 
     const size_t max_length = prompt_len + max_new_tokens;
     std::vector<int64_t> output_ids(max_length + block_size, sampling_params.eos_token_id >= 0 ? sampling_params.eos_token_id : -1);
@@ -901,7 +882,8 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
         trim_main_kv_cache(tokens_to_trim, start + current_block_size);
         target_hidden = slice_hidden_prefix(block_hidden.value(), accepted_len);
 
-        GENAI_INFO("DFLASH_DIRECT_ITER mode=inputs_embeds iter=%zu block=%zu proposed=%zu acceptance_len=%zu accepted_len=%zu draft_accepted=%zu rejected=%zu trim=%zu", 
+        if (direct_iteration_idx < 5) {
+            GENAI_INFO("DFLASH_DIRECT_ITER mode=inputs_embeds iter=%zu block=%zu proposed=%zu acceptance_len=%zu accepted_len=%zu draft_accepted=%zu rejected=%zu trim=%zu, start=%zu", 
                    direct_iteration_idx,
                    current_block_size,
                    draft_candidates_proposed,
@@ -909,7 +891,9 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
                    accepted_len,
                    draft_candidates_accepted,
                    draft_candidates_rejected,
-                   tokens_to_trim);
+                   tokens_to_trim,
+                   start);
+        }
 
         const auto iteration_end = std::chrono::steady_clock::now();
         const auto iteration_duration_us =
