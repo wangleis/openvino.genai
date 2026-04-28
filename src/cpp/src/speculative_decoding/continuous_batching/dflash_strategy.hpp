@@ -23,6 +23,8 @@ protected:
     std::shared_ptr<ov::Model> m_draft_model;
     ov::InferRequest m_main_request;
     ov::InferRequest m_draft_request;
+    ov::InferRequest m_draft_text_embeds_request;
+    bool m_use_draft_model_embeds = false;
     ov::genai::utils::KVAxesPosition m_main_kv_axes_pos;
     std::string m_main_device;
     ov::AnyMap m_main_properties;

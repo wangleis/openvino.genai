@@ -330,6 +330,14 @@ bool dflash_direct_trace_enabled() {
     return enabled;
 }
 
+bool dflash_draft_model_embeds_enabled() {
+    static const bool enabled = []() {
+        return is_truthy_env_flag(std::getenv("ENABLE_DRAFT_MODEL_EMBEDS"));
+    }();
+
+    return enabled;
+}
+
 constexpr size_t kInvalidOutputIndex = std::numeric_limits<size_t>::max();
 
 }  // namespace
@@ -517,6 +525,22 @@ ContinuousBatchingPipeline::DFlashDecodingImpl::DFlashDecodingImpl(const ov::gen
     }
 
     m_perf_metrics = ov::genai::SDPerModelsPerfMetrics();
+
+    m_use_draft_model_embeds = dflash_draft_model_embeds_enabled();
+    if (m_use_draft_model_embeds) {
+        try {
+            auto core = utils::singleton_core();
+            std::string draft_text_model_path =
+                "/home/xiping/mygithub/modular_genai/composable_pipeline/tests/test_models/Qwen3-VL-4B-Instruct-draft-dflash/openvino_text_embeddings_model.xml";
+            auto draft_text_model = core.read_model(draft_text_model_path);
+            auto draft_text_compiled = core.compile_model(draft_text_model, "CPU");
+            m_draft_text_embeds_request = draft_text_compiled.create_infer_request();
+            GENAI_INFO("DFLASH draft text embeds path enabled by env ENABLE_DRAFT_MODEL_EMBEDS");
+        } catch (const std::exception& ex) {
+            GENAI_WARN(std::string("DFLASH draft text embeds init failed, disabling ENABLE_DRAFT_MODEL_EMBEDS path: ") + ex.what());
+            m_use_draft_model_embeds = false;
+        }
+    }
 }
 
 GenerationHandle
@@ -807,7 +831,15 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
         {
             CircularBufferQueueElementGuard<EmbeddingsRequest> embeddings_request_guard(embedding_model->get_request_queue().get());
             EmbeddingsRequest& req = embeddings_request_guard.get();
-            ov::Tensor noise_embedding = embedding_model->infer(req, block_output_ids);
+            ov::Tensor noise_embedding;
+            if (m_use_draft_model_embeds) {
+                m_draft_text_embeds_request.set_input_tensor(block_output_ids);
+                m_draft_text_embeds_request.infer();
+                noise_embedding = m_draft_text_embeds_request.get_output_tensor(0);
+            } else {
+                noise_embedding = embedding_model->infer(req, block_output_ids);
+            }
+
             block_input_embeds = noise_embedding;
 
             ov::Tensor draft_logits = run_draft_model_step(noise_embedding, target_hidden, current_block_size);
@@ -847,12 +879,22 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
                         "DFlash direct mode requires hidden-state output for decode stage");
         block_hidden = step_hidden.value();
 
+        const auto block_logits_shape = block_logits.get_shape();
+        OPENVINO_ASSERT(block_logits_shape.size() == 3 && block_logits_shape[1] >= current_block_size,
+                        "Expected block logits shape [1,S,V] with S >= block size in DFlash direct decode");
+        const size_t logits_block_offset = block_logits_shape[1] - current_block_size;
+
         const auto block_hidden_shape = block_hidden->get_shape();
-        OPENVINO_ASSERT(block_hidden_shape.size() == 3 && block_hidden_shape[1] == current_block_size,
-                        "Expected block hidden state shape [1,block,H] in DFlash direct decode");
+        OPENVINO_ASSERT(block_hidden_shape.size() == 3 && block_hidden_shape[1] >= current_block_size,
+                        "Expected block hidden state shape [1,S,H] with S >= block size in DFlash direct decode");
+        if (block_hidden_shape[1] > current_block_size) {
+            auto [hidden_start_coord, hidden_end_coord] =
+                utils::make_roi(block_hidden_shape, 1, block_hidden_shape[1] - current_block_size, block_hidden_shape[1]);
+            block_hidden = ov::Tensor(block_hidden.value(), hidden_start_coord, hidden_end_coord);
+        }
 
         for (size_t i = 0; i < current_block_size; ++i) {
-            posterior[i] = greedy_pick_last_token(block_logits, i);
+            posterior[i] = greedy_pick_last_token(block_logits, logits_block_offset + i);
         }
 
         OPENVINO_ASSERT(block_hidden.has_value() && block_hidden->get_size() > 0,
