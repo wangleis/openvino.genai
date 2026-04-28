@@ -446,14 +446,14 @@ ContinuousBatchingPipeline::DFlashDecodingImpl::DFlashDecodingImpl(const ov::gen
             }
 
             m_main_hidden_output_index = kInvalidOutputIndex;
-            if (auto hidden_port = find_port_by_name(main_outputs, "hidden_states"); hidden_port.has_value()) {
-                m_main_hidden_output_name = first_tensor_name_or_empty(hidden_port.value());
-                if (auto hidden_idx = find_port_index_by_name(main_outputs, "hidden_states"); hidden_idx.has_value()) {
-                    m_main_hidden_output_index = hidden_idx.value();
-                }
-            } else if (auto last_hidden_port = find_port_by_name(main_outputs, "last_hidden_state"); last_hidden_port.has_value()) {
+            if (auto last_hidden_port = find_port_by_name(main_outputs, "last_hidden_state"); last_hidden_port.has_value()) {
                 m_main_hidden_output_name = first_tensor_name_or_empty(last_hidden_port.value());
                 if (auto hidden_idx = find_port_index_by_name(main_outputs, "last_hidden_state"); hidden_idx.has_value()) {
+                    m_main_hidden_output_index = hidden_idx.value();
+                }
+            } else if (auto hidden_port = find_port_by_name(main_outputs, "hidden_states"); hidden_port.has_value()) {
+                m_main_hidden_output_name = first_tensor_name_or_empty(hidden_port.value());
+                if (auto hidden_idx = find_port_index_by_name(main_outputs, "hidden_states"); hidden_idx.has_value()) {
                     m_main_hidden_output_index = hidden_idx.value();
                 }
             } else if (main_outputs.size() > 1) {
@@ -820,48 +820,39 @@ EncodedGenerationResult ContinuousBatchingPipeline::DFlashDecodingImpl::direct_b
                     block_ptr[i] = greedy_pick_last_token(draft_logits, pos);
                 }
             }
+
+            if (is_embedding_prefill) {
+                // Main-model verification must consume embeddings of draft-sampled tokens,
+                // not the initial mask-filled block.
+                block_input_embeds = embedding_model->infer(req, block_output_ids);
+            }
         }
 
         std::optional<ov::Tensor> block_hidden;
         std::vector<int64_t> posterior(current_block_size);
+
+        std::optional<ov::Tensor> main_block_input_embeds = std::nullopt;
+        if (is_embedding_prefill && block_input_embeds.has_value()) {
+            main_block_input_embeds = block_input_embeds.value();
+        }
+
+        std::optional<ov::Tensor> step_hidden;
+        ov::Tensor block_logits = run_main_model_step(block_output_ids,
+                                                      decode_start_pos + (start - prompt_len),
+                                                      lm_extra_inputs,
+                                                      step_hidden,
+                                                      true,
+                                                      main_block_input_embeds);
+        OPENVINO_ASSERT(step_hidden.has_value() && step_hidden->get_size() > 0,
+                        "DFlash direct mode requires hidden-state output for decode stage");
+        block_hidden = step_hidden.value();
+
+        const auto block_hidden_shape = block_hidden->get_shape();
+        OPENVINO_ASSERT(block_hidden_shape.size() == 3 && block_hidden_shape[1] == current_block_size,
+                        "Expected block hidden state shape [1,block,H] in DFlash direct decode");
+
         for (size_t i = 0; i < current_block_size; ++i) {
-            ov::Tensor step_input_ids(ov::element::i64, {1, 1});
-            step_input_ids.data<int64_t>()[0] = block_ptr[i];
-
-            std::optional<ov::Tensor> step_input_embeds = std::nullopt;
-            if (is_embedding_prefill && block_input_embeds.has_value()) {
-                const auto& full_embeds = block_input_embeds.value();
-                const auto full_shape = full_embeds.get_shape();
-                OPENVINO_ASSERT(full_shape.size() == 3 && full_shape[1] >= (i + 1),
-                                "Invalid block input embeds shape for DFlash direct decode");
-                auto [emb_start_coord, emb_end_coord] = utils::make_roi(full_shape, 1, i, i + 1);
-                step_input_embeds = ov::Tensor(full_embeds, emb_start_coord, emb_end_coord);
-            }
-
-            std::optional<ov::Tensor> step_hidden;
-            ov::Tensor step_logits = run_main_model_step(step_input_ids,
-                                                         decode_start_pos + (start - prompt_len) + i,
-                                                         lm_extra_inputs,
-                                                         step_hidden,
-                                                         true,
-                                                         step_input_embeds);
-            OPENVINO_ASSERT(step_hidden.has_value() && step_hidden->get_size() > 0,
-                            "DFlash direct mode requires hidden-state output for decode stage");
-
-            posterior[i] = greedy_pick_last_token(step_logits, step_logits.get_shape()[1] - 1);
-
-            if (!block_hidden.has_value()) {
-                const auto step_hidden_shape = step_hidden->get_shape();
-                OPENVINO_ASSERT(step_hidden_shape.size() == 3 && step_hidden_shape[1] == 1,
-                                "Expected step hidden state shape [1,1,H] in DFlash direct decode");
-                block_hidden = ov::Tensor(step_hidden->get_element_type(), {1, current_block_size, step_hidden_shape[2]});
-            }
-
-            const auto step_hidden_shape = step_hidden->get_shape();
-            const size_t bytes_per_step_hidden = step_hidden_shape[2] * step_hidden->get_element_type().size();
-            char* dst = static_cast<char*>(block_hidden->data()) + i * bytes_per_step_hidden;
-            const char* src = static_cast<const char*>(step_hidden->data());
-            std::memcpy(dst, src, bytes_per_step_hidden);
+            posterior[i] = greedy_pick_last_token(block_logits, i);
         }
 
         OPENVINO_ASSERT(block_hidden.has_value() && block_hidden->get_size() > 0,
@@ -1109,6 +1100,9 @@ ov::Tensor ContinuousBatchingPipeline::DFlashDecodingImpl::run_main_model_step(
 
     if (hidden_state.has_value()) {
         hidden_state = to_batch_major_3d(hidden_state.value());
+        if (dflash_direct_trace_enabled()) {
+            GENAI_INFO("DFLASH_MAIN_DECODE_HIDDEN shape=%s", shape_to_string(hidden_state->get_shape()).c_str());
+        }
     }
 
     ov::Tensor logits;
@@ -1200,6 +1194,9 @@ ov::Tensor ContinuousBatchingPipeline::DFlashDecodingImpl::run_main_model_prefil
 
     if (hidden_state.has_value()) {
         hidden_state = to_batch_major_3d(hidden_state.value());
+        if (dflash_direct_trace_enabled()) {
+            GENAI_INFO("DFLASH_PREFILL_HIDDEN shape=%s", shape_to_string(hidden_state->get_shape()).c_str());
+        }
     }
 
     ov::Tensor logits;
@@ -1215,6 +1212,13 @@ ov::Tensor ContinuousBatchingPipeline::DFlashDecodingImpl::run_draft_model_step(
                                                                                  const ov::Tensor& target_hidden,
                                                                                  size_t block_size) {
     const size_t seq_len = target_hidden.get_shape()[1] + noise_embedding.get_shape()[1];
+    if (dflash_direct_trace_enabled()) {
+        GENAI_INFO("DFLASH_DRAFT_INPUTS noise_embedding=%s target_hidden=%s block_size=%zu seq_len=%zu",
+                   shape_to_string(noise_embedding.get_shape()).c_str(),
+                   shape_to_string(target_hidden.get_shape()).c_str(),
+                   block_size,
+                   seq_len);
+    }
     auto position_ids = build_i64_arange_row(0, seq_len);
     auto mask_input = find_port_by_name(m_draft_model->inputs(), "attention_mask");
     OPENVINO_ASSERT(mask_input.has_value(), "DFlash draft model must have attention_mask input");
